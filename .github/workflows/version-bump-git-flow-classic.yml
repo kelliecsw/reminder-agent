@@ -1,0 +1,129 @@
+# Example workflow for classic Git Flow:
+# See docs/git-flow-guide.md for setup, branch policy, PR flow, and merge settings.
+# - develop -> tagged alpha prereleases on the upcoming release line
+# - release/<x.y.z> stabilizes that same line as rc prereleases
+# - master -> stable releases
+# - hotfix/** -> patch rc prereleases, then stable on master
+# - release/** and hotfix/** may also merge into develop; if develop is already ahead it preserves that alpha line and may advance alpha when meaningful unique fixes land there
+# - if develop is not ahead yet, those backmerges may catch develop up to the promoted stable target without tagging
+
+name: Version Bump (Classic)
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+      - "release/**"
+      - "hotfix/**"
+      - "feature/**"
+      - "bugfix/**"
+  workflow_dispatch:
+
+env:
+  GIT_TOOLS_REPO: https://github.com/davidyytan/git-tools.git
+  GIT_TOOLS_REF: feature/support-for-semver-1
+  GIT_BOT_NAME: kelliecsw-bot
+  GIT_BOT_EMAIL: kellie.chin2@gmail.com
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          ssh-key: ${{ secrets.BOT_SSH_SECRETKEY }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone git-tools
+        run: |
+          git clone --branch "$GIT_TOOLS_REF" "$GIT_TOOLS_REPO" "$RUNNER_TEMP/git-tools"
+
+      - name: Decide version strategy
+        id: strategy
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+        run: |
+          PYTHONPATH="$RUNNER_TEMP/git-tools" python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from git_tools.generators.bumpgen import decide_version_strategy, write_github_output
+
+          write_github_output(
+              Path(os.environ["GITHUB_OUTPUT"]),
+              decide_version_strategy(
+                  Path.cwd(),
+                  os.environ["BRANCH_NAME"],
+                  flow="classic",
+              ),
+          )
+          PY
+
+      - name: Show decision
+        run: |
+          echo "branch=${{ steps.strategy.outputs.branch }}"
+          echo "skip=${{ steps.strategy.outputs.skip }}"
+          echo "invalid=${{ steps.strategy.outputs.invalid }}"
+          echo "mode=${{ steps.strategy.outputs.mode }}"
+          echo "reason=${{ steps.strategy.outputs.reason }}"
+          echo "error=${{ steps.strategy.outputs.error }}"
+          echo "release_target=${{ steps.strategy.outputs.release_target }}"
+          echo "hotfix_target=${{ steps.strategy.outputs.hotfix_target }}"
+          echo "current_version=${{ steps.strategy.outputs.current_version }}"
+          echo "current_release_line=${{ steps.strategy.outputs.current_release_line }}"
+          echo "master_version=${{ steps.strategy.outputs.master_version }}"
+          echo "master_release_line=${{ steps.strategy.outputs.master_release_line }}"
+          echo "bootstrap_commitizen_version_ok=${{ steps.strategy.outputs.bootstrap_commitizen_version_ok }}"
+          echo "bootstrap_subject_ok=${{ steps.strategy.outputs.bootstrap_subject_ok }}"
+          echo "current_is_prerelease=${{ steps.strategy.outputs.current_is_prerelease }}"
+          echo "bump_eligible=${{ steps.strategy.outputs.bump_eligible }}"
+          echo "branch_gate_ref=${{ steps.strategy.outputs.branch_gate_ref }}"
+          echo "branch_has_unique_commits=${{ steps.strategy.outputs.branch_has_unique_commits }}"
+          echo "create_tag=${{ steps.strategy.outputs.create_tag }}"
+          echo "subject=${{ steps.strategy.outputs.subject }}"
+
+      - name: Fail invalid release branch configuration
+        if: steps.strategy.outputs.invalid == 'true'
+        run: |
+          echo "${{ steps.strategy.outputs.error }}"
+          exit 1
+
+      - name: Import GPG key
+        if: steps.strategy.outputs.skip != 'true' && steps.strategy.outputs.invalid != 'true'
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.BOT_GPG_SECRETKEY }}
+          trust_level: 5
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
+          git_config_global: true
+
+      - name: Run version bump
+        if: steps.strategy.outputs.skip != 'true' && steps.strategy.outputs.invalid != 'true'
+        env:
+          EDITOR: vi
+          BUMP_ARGS: ${{ steps.strategy.outputs.args }}
+        run: |
+          git config --local user.name "$GIT_BOT_NAME"
+          git config --local user.email "$GIT_BOT_EMAIL"
+          git fetch --force --tags origin
+
+          PYTHONPATH="$RUNNER_TEMP/git-tools" python -m git_tools.generators.bumpgen $BUMP_ARGS
+
+      - name: Push changes
+        if: steps.strategy.outputs.skip != 'true' && steps.strategy.outputs.invalid != 'true'
+        run: |
+          git push
+          if [ "${{ steps.strategy.outputs.create_tag }}" = "true" ]; then
+            git push --tags
+          fi

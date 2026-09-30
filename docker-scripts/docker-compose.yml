@@ -1,0 +1,10 @@
+services:
+  reminder-agent:
+    image: ghcr.io/kelliecsw/reminder-agent:latest
+    env_file:
+      - ../.env
+    volumes:
+      - ../docker-data/reminder-agent/logs:/.logs
+      - ../docker-data/reminder-agent/db:/.db
+    restart: unless-stopped
+    stop_grace_period: 30s
