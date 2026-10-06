@@ -73,7 +73,7 @@ def test_task_reminder_round_trips_with_complex_recurrence(
     assert loaded == reminder
 
 
-def test_goal_check_in_can_be_persisted_and_listed_by_goal(
+def test_goal_reminder_can_be_persisted_and_listed_by_goal(
     database: Database,
     user_id: int,
 ):
@@ -94,7 +94,7 @@ def test_goal_check_in_can_be_persisted_and_listed_by_goal(
             Reminder(
                 user_id=user_id,
                 goal_id=goal.id,
-                purpose=ReminderPurpose.GOAL_CHECK_IN,
+                purpose=ReminderPurpose.GOAL_REMINDER,
                 schedule=ReminderSchedule(
                     start_date=date(2026, 8, 23),
                     local_time=time(20, 0),

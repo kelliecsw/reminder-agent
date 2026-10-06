@@ -186,7 +186,7 @@ class DeliveryService:
                     and goal.user_id == delivery.user_id
                     and goal.status not in {GoalStatus.COMPLETED, GoalStatus.CANCELLED}
                 ):
-                    text = f"Goal check-in: {goal.title}"
+                    text = f"Goal reminder: {goal.title}"
 
             if text is None:
                 self.delivery_repo.update(

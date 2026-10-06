@@ -60,11 +60,11 @@ def test_task_reminder_can_target_task():
     assert reminder.goal_id is None
 
 
-def test_goal_check_in_can_target_goal():
+def test_goal_reminder_can_target_goal():
     reminder = Reminder(
         user_id=1,
         goal_id=10,
-        purpose=ReminderPurpose.GOAL_CHECK_IN,
+        purpose=ReminderPurpose.GOAL_REMINDER,
         schedule=_schedule(),
     )
 
@@ -102,12 +102,12 @@ def test_task_reminder_must_target_task():
         )
 
 
-def test_goal_check_in_must_target_goal():
+def test_goal_reminder_must_target_goal():
     with pytest.raises(InvalidReminderTargetError):
         Reminder(
             user_id=1,
             task_id=5,
-            purpose=ReminderPurpose.GOAL_CHECK_IN,
+            purpose=ReminderPurpose.GOAL_REMINDER,
             schedule=_schedule(),
         )
 
