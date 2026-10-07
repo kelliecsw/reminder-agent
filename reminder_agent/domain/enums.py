@@ -57,7 +57,7 @@ class ToolExecutionStatus(StrEnum):
 
 class ReminderPurpose(StrEnum):
     TASK_REMINDER = "task_reminder"
-    GOAL_CHECK_IN = "goal_check_in"
+    GOAL_REMINDER = "goal_reminder"
 
 
 class Frequency(StrEnum):

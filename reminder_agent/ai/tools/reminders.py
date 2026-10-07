@@ -77,15 +77,15 @@ def create_task_reminder(
 
 
 @tool
-def create_goal_check_in(
+def create_goal_reminder(
     goal_id: Annotated[int, Field(gt=0)],
     schedule: ScheduleArgs,
     runtime: RuntimeArg,
 ) -> dict:
-    """Create a check-in reminder for one known goal using a structured schedule."""
+    """Create a reminder for one known goal using a structured local schedule."""
     reminder = runtime.reminders.create(
         runtime.user_id,
-        purpose=ReminderPurpose.GOAL_CHECK_IN,
+        purpose=ReminderPurpose.GOAL_REMINDER,
         goal_id=goal_id,
         schedule=_schedule(schedule, runtime.timezone),
     )
@@ -150,7 +150,7 @@ def resume_reminder(
 
 REMINDER_TOOLS = [
     create_task_reminder,
-    create_goal_check_in,
+    create_goal_reminder,
     get_reminder,
     list_reminders,
     reschedule_reminder,

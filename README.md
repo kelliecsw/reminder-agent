@@ -2,6 +2,47 @@
 
 A Telegram bot for creating and delivering AI-assisted reminders.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    user["Telegram user"] <--> telegram["Telegram Bot API"]
+
+    subgraph app["Reminder Agent"]
+        intake["Update intake"]
+        updates[("Durable update queue")]
+        processor["Telegram workers<br/>and processor"]
+        agent["LangGraph agent"]
+        domain["Task, goal, reminder,<br/>and delivery services"]
+        scheduler["Reminder scheduler"]
+        outbox[("Transactional outbox")]
+        sender["Outbox worker"]
+
+        intake --> updates --> processor
+        processor --> agent
+        processor --> domain
+        agent --> domain
+        scheduler --> domain
+        processor --> outbox
+        scheduler --> outbox
+        outbox --> sender
+    end
+
+    telegram --> intake
+    sender --> telegram
+    agent <--> llm["Configured LLM provider"]
+    agent --> search["Tavily web search"]
+    domain <--> database[("SQLite")]
+    updates -. persisted in .-> database
+    outbox -. persisted in .-> database
+```
+
+Incoming Telegram updates are persisted before workers process conversations,
+commands, and button callbacks. The agent and direct Telegram actions share the
+same domain services, while the scheduler materializes due reminders. Replies
+and reminders are written to a transactional outbox, then delivered to Telegram
+by a retrying worker.
+
 ## Docker setup
 
 You need Docker with Compose, a Telegram bot token, your Telegram user ID, and

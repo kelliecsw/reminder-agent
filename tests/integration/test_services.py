@@ -104,7 +104,7 @@ def test_reminder_lifecycle_and_task_completion(user_id: int, services):
     assert cancelled.version == 5
 
 
-def test_goal_completion_keeps_child_tasks_and_cancels_check_ins(
+def test_goal_completion_keeps_child_tasks_and_cancels_goal_reminders(
     user_id: int, services
 ):
     goals, tasks, reminders = services
@@ -112,7 +112,7 @@ def test_goal_completion_keeps_child_tasks_and_cancels_check_ins(
     task = tasks.create(user_id, "Run", goal_id=goal.id)
     reminder = reminders.create(
         user_id,
-        purpose=ReminderPurpose.GOAL_CHECK_IN,
+        purpose=ReminderPurpose.GOAL_REMINDER,
         goal_id=goal.id,
         schedule=ReminderSchedule(
             start_date=date(2026, 8, 21),

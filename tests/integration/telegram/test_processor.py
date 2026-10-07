@@ -3,8 +3,14 @@ from datetime import UTC, date, datetime, time
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage
-from reminder_agent.domain.enums import DeliveryStatus, ReminderPurpose
-from reminder_agent.domain.recurrence import ReminderSchedule
+from reminder_agent.domain.enums import (
+    DeliveryStatus,
+    Frequency,
+    ReminderPurpose,
+    ReminderStatus,
+    TaskStatus,
+)
+from reminder_agent.domain.recurrence import RecurrenceRule, ReminderSchedule
 from reminder_agent.repositories.users import UserRepository
 from reminder_agent.scheduler.materializer import ReminderMaterializer
 from reminder_agent.services.delivery_actions import DeliveryActionService
@@ -282,6 +288,43 @@ def test_callback_cannot_operate_on_another_users_delivery(database, user_id):
     assert update.callback_query.answered is True
     assert deliveries.get(other_user_id, delivery.id).status == DeliveryStatus.SENT
     assert "does not belong" in bot.messages[-1]["text"]
+
+
+def test_done_callback_marks_only_the_task_reminder_occurrence(database, user_id):
+    task = TaskService(database).create(user_id, "Submit report")
+    reminder = ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+            recurrence=RecurrenceRule(frequency=Frequency.DAILY),
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    bot = FakeBot()
+    update = _callback_update(f"d:{delivery.id}:done")
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            update,
+            SimpleNamespace(bot=bot),
+        )
+    )
+
+    assert update.callback_query.cleared is True
+    assert deliveries.get(user_id, delivery.id).status == DeliveryStatus.ACTED_ON
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+    assert (
+        ReminderService(database).get(user_id, reminder.id).status
+        == ReminderStatus.ACTIVE
+    )
+    assert bot.messages[-1]["text"] == "Marked this reminder occurrence done."
 
 
 def test_replayed_callback_does_not_repeat_mutation(database, user_id):

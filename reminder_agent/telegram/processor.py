@@ -13,6 +13,7 @@ from reminder_agent.ai.graph import initial_state
 from reminder_agent.clock import utc_now
 from reminder_agent.domain.enums import (
     GoalStatus,
+    ReminderPurpose,
     ReminderStatus,
     TaskStatus,
 )
@@ -394,8 +395,13 @@ class TelegramProcessor:
             if resource != "d":
                 raise ValueError("Invalid button resource.")
             if action == "done":
-                self.delivery_actions.done(user_id, resource_id)
-                return {"response": "Marked done."}
+                result = self.delivery_actions.done(user_id, resource_id)
+                response = (
+                    "Marked this reminder occurrence done and recorded goal progress."
+                    if result.reminder_purpose == ReminderPurpose.GOAL_REMINDER
+                    else "Marked this reminder occurrence done."
+                )
+                return {"response": response}
             if action == "skip":
                 self.deliveries.skip(user_id, resource_id)
                 return {"response": "Skipped this reminder occurrence."}

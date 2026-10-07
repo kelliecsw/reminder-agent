@@ -217,7 +217,11 @@ class ReminderService:
                     f"Cannot remind {task.status.value} task {task_id}."
                 )
             return
-        if purpose == ReminderPurpose.GOAL_CHECK_IN and goal_id is not None and task_id is None:
+        if (
+            purpose == ReminderPurpose.GOAL_REMINDER
+            and goal_id is not None
+            and task_id is None
+        ):
             goal = require_goal(conn, self.goal_repo, user_id, goal_id)
             if goal.status in {GoalStatus.COMPLETED, GoalStatus.CANCELLED}:
                 raise InvalidStateTransitionError(

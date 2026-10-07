@@ -83,11 +83,11 @@ class Reminder:
             )
 
         if (
-            self.purpose == ReminderPurpose.GOAL_CHECK_IN
+            self.purpose == ReminderPurpose.GOAL_REMINDER
             and self.goal_id is None
         ):
             raise InvalidReminderTargetError(
-                "A goal check-in reminder must target a goal."
+                "A goal reminder must target a goal."
             )
 
         if self.version < 1:
