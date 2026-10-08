@@ -15,6 +15,7 @@ from langgraph.graph import END, START, StateGraph
 
 from reminder_agent.ai.compression import (
     CompressionConfig,
+    check_compression,
     compression_config_from_settings,
     count_prompt_tokens,
     count_text_tokens,
@@ -37,7 +38,9 @@ from reminder_agent.services.agent_threads import AgentThreadService
 logger = logging.getLogger(__name__)
 LOG_SEPARATOR = "=" * 60
 
-
+# ============================================================
+# NODE DEFINITIONS
+# ============================================================
 async def _agent_node(
     state: AgentState,
     *,
@@ -221,62 +224,79 @@ async def _tool_node(
     return update
 
 
-async def _route_after_agent(state: AgentState) -> Literal["tools", "end"]:
-    last = state["messages"][-1]
-    if isinstance(last, AIMessage) and last.tool_calls:
-        return "tools"
-    return "end"
-
-
-async def _route_from_start(
-    state: AgentState,
-) -> Literal["compress_prepare", "tools"]:
-    if state.get("messages"):
-        last = state["messages"][-1]
-        if isinstance(last, AIMessage) and last.tool_calls:
-            return "tools"
-    return "compress_prepare"
-
-
 async def _compress_prepare_node(
     state: AgentState,
     *,
     tool_schema_tokens: int,
     compression_config: CompressionConfig,
 ) -> dict[str, Any]:
+    logger.info("")
+    logger.info(LOG_SEPARATOR)
+    logger.info(
+        "[COMPRESS_PREPARE] Checking context · request_id=%s",
+        state.get("request_id") or "-",
+    )
+    system_prompt = build_system_prompt(dict(state))
+    check = check_compression(
+        messages=state["messages"],
+        context_summary=state.get("context_summary", ""),
+        compression_step_count=state.get("compression_step_count", 0),
+        system_prompt=system_prompt,
+        tool_schema_tokens=tool_schema_tokens,
+        config=compression_config,
+    )
+    step_limit = (
+        f"{compression_config.step_interval:,}"
+        if compression_config.step_interval > 0
+        else "disabled"
+    )
+    logger.info(
+        "[COMPRESS_PREPARE] Context · tokens=%s/%s · turns=%s/%s · steps=%s/%s",
+        f"{check.tokens:,}",
+        f"{compression_config.token_threshold:,}",
+        f"{check.turns:,}",
+        f"{compression_config.turn_trigger:,}",
+        f"{check.steps:,}",
+        step_limit,
+    )
     prepared = prepare_compression(
         messages=state["messages"],
         context_summary=state.get("context_summary", ""),
         compression_step_count=state.get("compression_step_count", 0),
-        system_prompt=build_system_prompt(dict(state)),
+        system_prompt=system_prompt,
         tool_schema_tokens=tool_schema_tokens,
         config=compression_config,
+        check=check,
     )
     if prepared is None:
+        logger.info(
+            "[COMPRESS_PREPARE] No compression needed.",
+        )
+        logger.info(LOG_SEPARATOR)
         return {
             "compression_prepared_result": None,
             "memory_rewrite_status": None,
         }
     logger.info(
-        "[COMPRESSION] Prepared reasons=%s tokens=%s->%s turns=%s removed=%s",
+        "[COMPRESS_PREPARE] Triggered · reasons=%s",
         ",".join(prepared["trigger_reasons"]),
+    )
+    logger.info(
+        "[COMPRESS_PREPARE] Tokens · before=%s · projected=%s · target=%s",
         prepared["tokens_before"],
         prepared["projected_tokens"],
+        compression_config.target_tokens,
+    )
+    logger.info(
+        "[COMPRESS_PREPARE] Exchanges · before=%s · selected_for_summary=%s",
         prepared["turns_before"],
         prepared["turns_removed"],
     )
+    logger.info(LOG_SEPARATOR)
     return {
         "compression_prepared_result": prepared,
         "memory_rewrite_status": None,
     }
-
-
-async def _route_after_compress_prepare(
-    state: AgentState,
-) -> Literal["agent", "memory_chat"]:
-    if state.get("compression_prepared_result") is None:
-        return "agent"
-    return "memory_chat"
 
 
 async def _memory_chat_node(
@@ -289,20 +309,39 @@ async def _memory_chat_node(
     if prepared is None:
         raise RuntimeError("memory_chat called without a prepared compression result.")
     summary_exchanges = prepared.get("summary_exchanges", [])
+    existing_summary = str(prepared.get("context_summary", ""))
+    existing_summary_tokens = count_text_tokens(existing_summary)
+    logger.info("")
+    logger.info(LOG_SEPARATOR)
+    logger.info(
+        "[MEMORY_CHAT] Updating historical summary · request_id=%s",
+        state.get("request_id") or "-",
+    )
+    logger.info(
+        "[MEMORY_CHAT] Input · exchanges=%s · existing_summary_tokens=%s",
+        len(summary_exchanges),
+        existing_summary_tokens,
+    )
     summary = await update_context_summary(
         model=model_without_tools,
-        existing_summary=str(prepared.get("context_summary", "")),
+        existing_summary=existing_summary,
         exchanges=summary_exchanges,
         config=compression_config,
     )
+    rewrite_status = "updated" if summary_exchanges else "unchanged"
+    logger.info(
+        "[MEMORY_CHAT] Result · status=%s · summary_tokens=%s->%s",
+        rewrite_status,
+        existing_summary_tokens,
+        count_text_tokens(summary),
+    )
+    logger.info(LOG_SEPARATOR)
     return {
         "compression_prepared_result": {
             **prepared,
             "context_summary": summary,
         },
-        "memory_rewrite_status": (
-            "updated" if summary_exchanges else "unchanged"
-        ),
+        "memory_rewrite_status": rewrite_status,
     }
 
 
@@ -320,6 +359,12 @@ async def _compress_commit_node(
         raise RuntimeError("compress_commit called without a prepared result.")
     messages = list(prepared["messages"])
     context_summary = str(prepared.get("context_summary", ""))
+    logger.info("")
+    logger.info(LOG_SEPARATOR)
+    logger.info(
+        "[COMPRESS_COMMIT] Validating compacted context · request_id=%s",
+        state.get("request_id") or "-",
+    )
     ensure_tool_call_integrity(messages)
     final_tokens = count_prompt_tokens(
         system_prompt=build_system_prompt(dict(state)),
@@ -328,6 +373,12 @@ async def _compress_commit_node(
         tool_schema_tokens=tool_schema_tokens,
     )
     if final_tokens > compression_config.token_threshold:
+        logger.error(
+            "[COMPRESS_COMMIT] Rejected · tokens=%s · threshold=%s",
+            final_tokens,
+            compression_config.token_threshold,
+        )
+        logger.info(LOG_SEPARATOR)
         raise RuntimeError(
             "Compressed conversation still exceeds the token threshold: "
             f"{final_tokens} > {compression_config.token_threshold}."
@@ -350,12 +401,50 @@ async def _compress_commit_node(
         )
         update["thread_version"] = saved.version
     logger.info(
-        "[COMPRESSION] Committed tokens=%s summary_tokens=%s",
+        "[COMPRESS_COMMIT] Committed · messages=%s · tokens=%s · "
+        "summary_tokens=%s · persisted=%s · thread_version=%s",
+        len(messages),
         final_tokens,
         count_text_tokens(context_summary),
+        thread_service is not None,
+        update.get("thread_version", "-"),
     )
+    logger.info(LOG_SEPARATOR)
     return update
 
+
+# ============================================================
+# EDGE DEFINITIONS
+# ============================================================
+
+async def _route_after_agent(state: AgentState) -> Literal["tools", "end"]:
+    last = state["messages"][-1]
+    if isinstance(last, AIMessage) and last.tool_calls:
+        return "tools"
+    return "end"
+
+
+async def _route_from_start(
+    state: AgentState,
+) -> Literal["compress_prepare", "tools"]:
+    if state.get("messages"):
+        last = state["messages"][-1]
+        if isinstance(last, AIMessage) and last.tool_calls:
+            return "tools"
+    return "compress_prepare"
+
+
+async def _route_after_compress_prepare(
+    state: AgentState,
+) -> Literal["agent", "memory_chat"]:
+    if state.get("compression_prepared_result") is None:
+        return "agent"
+    return "memory_chat"
+
+
+# ============================================================
+# GRAPH DEFINITIONS
+# ============================================================
 
 def create_reminder_agent(
     *,

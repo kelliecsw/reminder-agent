@@ -129,7 +129,11 @@ def test_graph_runs_agent_tool_agent_loop_with_old_style_logs(
     assert "Buy printer ink" in caplog.text
 
 
-def test_graph_can_finish_without_tools(database: Database, user_id: int):
+def test_graph_can_finish_without_tools(
+    database: Database,
+    user_id: int,
+    caplog,
+):
     model = FakeToolCallingModel([AIMessage(content="Hello!")])
     graph = create_reminder_agent(
         settings=_settings(),
@@ -141,19 +145,23 @@ def test_graph_can_finish_without_tools(database: Database, user_id: int):
         ),
         clock=lambda: NOW,
     )
-    result = asyncio.run(
-        graph.ainvoke(
-            initial_state(
-                messages=[HumanMessage(content="Hello")],
-                user_id=user_id,
-                timezone="Asia/Singapore",
-                now_utc=NOW,
-                tool_round_limit=4,
+    with caplog.at_level(logging.INFO, logger="reminder_agent.ai.graph"):
+        result = asyncio.run(
+            graph.ainvoke(
+                initial_state(
+                    messages=[HumanMessage(content="Hello")],
+                    user_id=user_id,
+                    timezone="Asia/Singapore",
+                    now_utc=NOW,
+                    tool_round_limit=4,
+                )
             )
         )
-    )
     assert result["messages"][-1].content == "Hello!"
     assert result["tool_round_count"] == 0
+    assert "[COMPRESS_PREPARE] Context · tokens=" in caplog.text
+    assert "/200,000 · turns=1/100 · steps=0/100" in caplog.text
+    assert "[COMPRESS_PREPARE] No compression needed." in caplog.text
 
 
 def test_graph_persists_follow_up_question_in_conversation(database, user_id):
@@ -664,7 +672,11 @@ def test_initial_state_drops_prior_raw_web_messages():
     ]
 
 
-def test_graph_compresses_old_exchanges_and_persists_summary(database, user_id):
+def test_graph_compresses_old_exchanges_and_persists_summary(
+    database,
+    user_id,
+    caplog,
+):
     threads = AgentThreadService(database)
     initial = threads.save(
         user_id,
@@ -706,24 +718,37 @@ def test_graph_compresses_old_exchanges_and_persists_summary(database, user_id):
         thread_service=threads,
     )
 
-    result = asyncio.run(
-        graph.ainvoke(
-            initial_state(
-                messages=initial.messages,
-                user_id=user_id,
-                timezone="Asia/Singapore",
-                now_utc=NOW,
-                tool_round_limit=4,
-                thread_version=initial.version,
+    with caplog.at_level(logging.INFO, logger="reminder_agent.ai.graph"):
+        result = asyncio.run(
+            graph.ainvoke(
+                initial_state(
+                    messages=initial.messages,
+                    user_id=user_id,
+                    timezone="Asia/Singapore",
+                    now_utc=NOW,
+                    tool_round_limit=4,
+                    request_id="telegram:compression-test",
+                    thread_version=initial.version,
+                )
             )
         )
-    )
 
     assert result["messages"][0].content == "What tasks do I have?"
     assert result["messages"][-1].content == "Let us plan your day."
     assert result["memory_rewrite_status"] == "updated"
     assert len(model.invocations) == 2
     assert "Historical conversation summary" in model.invocations[1][1].content
+    assert (
+        "[COMPRESS_PREPARE] Checking context · "
+        "request_id=telegram:compression-test"
+    ) in caplog.text
+    assert "/100,000 · turns=3/3 · steps=0/disabled" in caplog.text
+    assert "[COMPRESS_PREPARE] Triggered · reasons=turns" in caplog.text
+    assert "[MEMORY_CHAT] Updating historical summary" in caplog.text
+    assert "[MEMORY_CHAT] Result · status=updated" in caplog.text
+    assert "[COMPRESS_COMMIT] Validating compacted context" in caplog.text
+    assert "[COMPRESS_COMMIT] Committed" in caplog.text
+    assert "[COMPRESSION]" not in caplog.text
 
     saved = threads.load(user_id)
     assert saved.context_summary == "The user prefers morning runs."

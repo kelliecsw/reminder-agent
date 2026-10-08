@@ -39,6 +39,14 @@ class CompressionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class CompressionCheck:
+    tokens: int
+    turns: int
+    steps: int
+    trigger_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class CompressionConfig:
     token_threshold: int = 200_000
     target_tokens: int = 40_000
@@ -160,6 +168,40 @@ def split_conversation_exchanges(
     return exchanges
 
 
+def check_compression(
+    *,
+    messages: Sequence[BaseMessage],
+    context_summary: str,
+    compression_step_count: int,
+    system_prompt: str,
+    tool_schema_tokens: int,
+    config: CompressionConfig,
+) -> CompressionCheck:
+    turns = len(split_conversation_exchanges(messages))
+    tokens = count_prompt_tokens(
+        system_prompt=system_prompt,
+        context_summary=context_summary,
+        messages=messages,
+        tool_schema_tokens=tool_schema_tokens,
+    )
+    reasons: list[str] = []
+    if tokens > config.token_threshold:
+        reasons.append("tokens")
+    if turns >= config.turn_trigger:
+        reasons.append("turns")
+    if (
+        config.step_interval > 0
+        and compression_step_count >= config.step_interval
+    ):
+        reasons.append("steps")
+    return CompressionCheck(
+        tokens=tokens,
+        turns=turns,
+        steps=compression_step_count,
+        trigger_reasons=tuple(reasons),
+    )
+
+
 def prepare_compression(
     *,
     messages: Sequence[BaseMessage],
@@ -168,27 +210,21 @@ def prepare_compression(
     system_prompt: str,
     tool_schema_tokens: int,
     config: CompressionConfig,
+    check: CompressionCheck | None = None,
 ) -> dict[str, Any] | None:
     current_messages = list(messages)
     ensure_tool_call_integrity(current_messages)
     exchanges = split_conversation_exchanges(current_messages)
-    tokens_before = count_prompt_tokens(
-        system_prompt=system_prompt,
-        context_summary=context_summary,
+    check = check or check_compression(
         messages=current_messages,
+        context_summary=context_summary,
+        compression_step_count=compression_step_count,
+        system_prompt=system_prompt,
         tool_schema_tokens=tool_schema_tokens,
+        config=config,
     )
-
-    reasons: list[str] = []
-    if tokens_before > config.token_threshold:
-        reasons.append("tokens")
-    if len(exchanges) >= config.turn_trigger:
-        reasons.append("turns")
-    if (
-        config.step_interval > 0
-        and compression_step_count >= config.step_interval
-    ):
-        reasons.append("steps")
+    tokens_before = check.tokens
+    reasons = list(check.trigger_reasons)
     if not reasons:
         return None
 
@@ -253,7 +289,7 @@ def prepare_compression(
         "trigger_reasons": reasons,
         "tokens_before": tokens_before,
         "projected_tokens": projected_tokens,
-        "turns_before": len(exchanges),
+        "turns_before": check.turns,
         "turns_removed": remove_count,
     }
 
@@ -549,8 +585,10 @@ def _json_text(value: Any) -> str:
 
 
 __all__ = [
+    "CompressionCheck",
     "CompressionConfig",
     "CompressionError",
+    "check_compression",
     "compression_config_from_settings",
     "count_prompt_tokens",
     "count_text_tokens",
