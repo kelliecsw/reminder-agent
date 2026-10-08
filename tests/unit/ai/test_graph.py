@@ -3,12 +3,14 @@ import json
 import logging
 from datetime import UTC, datetime
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from reminder_agent.ai.graph import create_reminder_agent, initial_state
 from reminder_agent.ai.tools import get_all_tools
 from reminder_agent.ai.tools.registry import create_tool_registry
+from reminder_agent.config import Settings
 from reminder_agent.db.database import Database
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
@@ -18,6 +20,24 @@ from reminder_agent.services.tool_executions import ToolExecutionService
 
 
 NOW = datetime(2026, 8, 24, 0, 0, tzinfo=UTC)
+
+
+def _settings(**overrides) -> Settings:
+    values = {
+        "llm_retry_attempts": 1,
+        "log_private_content": False,
+        "agent_token_threshold": 200_000,
+        "agent_target_tokens": 40_000,
+        "compression_step_interval": 100,
+        "compression_turn_trigger": 100,
+        "compression_turn_target": 25,
+        "compression_keep_recent_turns": 3,
+        "compression_summary_max_tokens": 2_000,
+        "compression_summary_input_tokens": 50_000,
+        "compression_tool_payload_max_tokens": 200,
+    }
+    values.update(overrides)
+    return Settings(_env_file=None, **values)
 
 
 def _tool_result(messages, tool_call_id):
@@ -76,10 +96,10 @@ def test_graph_runs_agent_tool_agent_loop_with_old_style_logs(
         reminders=ReminderService(database, clock=lambda: NOW),
     )
     graph = create_reminder_agent(
+        settings=_settings(log_private_content=True),
         model=model,
         registry=registry,
         clock=lambda: NOW,
-        log_private_content=True,
     )
 
     with caplog.at_level(logging.INFO, logger="reminder_agent.ai.graph"):
@@ -112,6 +132,7 @@ def test_graph_runs_agent_tool_agent_loop_with_old_style_logs(
 def test_graph_can_finish_without_tools(database: Database, user_id: int):
     model = FakeToolCallingModel([AIMessage(content="Hello!")])
     graph = create_reminder_agent(
+        settings=_settings(),
         model=model,
         registry=create_tool_registry(
             tasks=TaskService(database),
@@ -145,6 +166,7 @@ def test_graph_persists_follow_up_question_in_conversation(database, user_id):
     )
     model = FakeToolCallingModel([AIMessage(content="What time?")])
     graph = create_reminder_agent(
+        settings=_settings(),
         model=model,
         registry=create_tool_registry(
             tasks=TaskService(database),
@@ -234,6 +256,7 @@ def test_relative_reminder_reads_clock_before_mutating(database, user_id):
         execution_service=ToolExecutionService(database),
     )
     graph = create_reminder_agent(
+        settings=_settings(),
         model=model,
         registry=registry,
         clock=lambda: NOW,
@@ -344,7 +367,12 @@ def test_web_search_uses_normal_follow_up_and_sanitizes_result(
         reminders=ReminderService(database),
         tools=_tools_with_fake_web(web_calls),
     )
-    graph = create_reminder_agent(model=model, registry=registry, clock=lambda: NOW)
+    graph = create_reminder_agent(
+        settings=_settings(),
+        model=model,
+        registry=registry,
+        clock=lambda: NOW,
+    )
 
     result = asyncio.run(
         graph.ainvoke(
@@ -395,7 +423,12 @@ def test_web_search_cannot_be_mixed_with_application_mutation(database, user_id)
         reminders=ReminderService(database),
         tools=_tools_with_fake_web(web_calls),
     )
-    graph = create_reminder_agent(model=model, registry=registry, clock=lambda: NOW)
+    graph = create_reminder_agent(
+        settings=_settings(),
+        model=model,
+        registry=registry,
+        clock=lambda: NOW,
+    )
 
     result = asyncio.run(
         graph.ainvoke(
@@ -453,7 +486,12 @@ def test_web_search_can_be_followed_by_application_mutation(database, user_id):
         reminders=ReminderService(database),
         tools=_tools_with_fake_web(web_calls),
     )
-    graph = create_reminder_agent(model=model, registry=registry, clock=lambda: NOW)
+    graph = create_reminder_agent(
+        settings=_settings(),
+        model=model,
+        registry=registry,
+        clock=lambda: NOW,
+    )
 
     result = asyncio.run(
         graph.ainvoke(
@@ -509,6 +547,7 @@ def test_web_search_raw_messages_are_not_persisted(database, user_id):
         tools=_tools_with_fake_web([]),
     )
     graph = create_reminder_agent(
+        settings=_settings(),
         model=model,
         registry=registry,
         clock=lambda: NOW,
@@ -565,6 +604,7 @@ def test_multiple_tools_of_same_execution_kind_are_allowed(database, user_id):
         tools=_tools_with_fake_web(web_calls),
     )
     graph = create_reminder_agent(
+        settings=_settings(),
         model=model,
         registry=registry,
         clock=lambda: NOW,
@@ -622,3 +662,135 @@ def test_initial_state_drops_prior_raw_web_messages():
         "Old cited answer",
         "New question",
     ]
+
+
+def test_graph_compresses_old_exchanges_and_persists_summary(database, user_id):
+    threads = AgentThreadService(database)
+    initial = threads.save(
+        user_id,
+        [
+            HumanMessage(content="My old preference is morning runs"),
+            AIMessage(content="I will keep that in mind."),
+            HumanMessage(content="What tasks do I have?"),
+            AIMessage(content="You have one active task."),
+            HumanMessage(content="Help me plan today"),
+        ],
+        expected_version=None,
+        now_utc=NOW,
+    )
+    model = FakeToolCallingModel(
+        [
+            AIMessage(content="The user prefers morning runs."),
+            AIMessage(content="Let us plan your day."),
+        ]
+    )
+    graph = create_reminder_agent(
+        settings=_settings(
+            agent_token_threshold=100_000,
+            agent_target_tokens=90_000,
+            compression_step_interval=0,
+            compression_turn_trigger=3,
+            compression_turn_target=2,
+            compression_keep_recent_turns=1,
+            compression_summary_max_tokens=100,
+            compression_summary_input_tokens=1_000,
+            compression_tool_payload_max_tokens=20,
+        ),
+        model=model,
+        registry=create_tool_registry(
+            tasks=TaskService(database),
+            goals=GoalService(database),
+            reminders=ReminderService(database),
+        ),
+        clock=lambda: NOW,
+        thread_service=threads,
+    )
+
+    result = asyncio.run(
+        graph.ainvoke(
+            initial_state(
+                messages=initial.messages,
+                user_id=user_id,
+                timezone="Asia/Singapore",
+                now_utc=NOW,
+                tool_round_limit=4,
+                thread_version=initial.version,
+            )
+        )
+    )
+
+    assert result["messages"][0].content == "What tasks do I have?"
+    assert result["messages"][-1].content == "Let us plan your day."
+    assert result["memory_rewrite_status"] == "updated"
+    assert len(model.invocations) == 2
+    assert "Historical conversation summary" in model.invocations[1][1].content
+
+    saved = threads.load(user_id)
+    assert saved.context_summary == "The user prefers morning runs."
+    assert saved.compression_step_count == 1
+    assert saved.messages[0].content == "What tasks do I have?"
+
+
+def test_summary_failure_does_not_commit_compression(database, user_id):
+    threads = AgentThreadService(database)
+    initial = threads.save(
+        user_id,
+        [
+            HumanMessage(content="Old exchange"),
+            AIMessage(content="Old answer"),
+            HumanMessage(content="Current exchange"),
+        ],
+        expected_version=None,
+        now_utc=NOW,
+    )
+
+    class FailingModel(FakeToolCallingModel):
+        async def ainvoke(self, messages):
+            self.invocations.append(messages)
+            raise RuntimeError("summary unavailable")
+
+    graph = create_reminder_agent(
+        settings=_settings(
+            llm_retry_attempts=0,
+            agent_token_threshold=100_000,
+            agent_target_tokens=90_000,
+            compression_step_interval=1,
+            compression_turn_trigger=10,
+            compression_turn_target=5,
+            compression_keep_recent_turns=1,
+            compression_summary_max_tokens=100,
+            compression_summary_input_tokens=1_000,
+            compression_tool_payload_max_tokens=20,
+        ),
+        model=FailingModel([]),
+        registry=create_tool_registry(
+            tasks=TaskService(database),
+            goals=GoalService(database),
+            reminders=ReminderService(database),
+        ),
+        clock=lambda: NOW,
+        thread_service=threads,
+    )
+
+    with pytest.raises(RuntimeError, match="summary unavailable"):
+        asyncio.run(
+            graph.ainvoke(
+                initial_state(
+                    messages=initial.messages,
+                    user_id=user_id,
+                    timezone="Asia/Singapore",
+                    now_utc=NOW,
+                    tool_round_limit=4,
+                    thread_version=initial.version,
+                    compression_step_count=1,
+                )
+            )
+        )
+
+    saved = threads.load(user_id)
+    assert [message.content for message in saved.messages] == [
+        "Old exchange",
+        "Old answer",
+        "Current exchange",
+    ]
+    assert saved.context_summary == ""

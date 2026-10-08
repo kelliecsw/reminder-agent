@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Sequence, TypedDict
+from typing import Any, TypedDict
 
 from langchain_core.messages import BaseMessage
-from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict, total=False):
-    messages: Annotated[Sequence[BaseMessage], add_messages]
+    messages: list[BaseMessage]
     user_id: int
     timezone: str
     now_utc: str
     now_local: str
+
     model_round_count: int
     tool_round_count: int
     tool_round_limit: int
+
     errors: list[str]
     request_id: str | None
     thread_version: int | None
+
+    context_summary: str
+    compression_step_count: int
+    compression_prepared_result: dict[str, Any] | None
+    memory_rewrite_status: str | None
 
 
 __all__ = ["AgentState"]

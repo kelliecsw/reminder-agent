@@ -63,10 +63,7 @@ async def run(settings: Settings) -> None:
     )
     updates = TelegramUpdateService(database)
     outbox = OutboxService(database)
-    threads = AgentThreadService(
-        database,
-        history_limit=settings.history_limit,
-    )
+    threads = AgentThreadService(database)
     tool_executions = ToolExecutionService(database)
     tasks = TaskService(database)
     goals = GoalService(database)
@@ -79,11 +76,11 @@ async def run(settings: Settings) -> None:
         reminders=reminders,
         execution_service=tool_executions,
     )
+    model = create_model(settings)
     graph = create_reminder_agent(
-        model=create_model(settings),
+        settings=settings,
+        model=model,
         registry=registry,
-        retry_attempts=settings.llm_retry_attempts,
-        log_private_content=settings.log_private_content,
         thread_service=threads,
     )
     processor = TelegramProcessor(

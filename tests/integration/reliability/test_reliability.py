@@ -140,20 +140,38 @@ def test_outbox_deduplicates_and_rejects_stale_claim(database, user_id):
 
 
 def test_agent_thread_survives_service_restart(database, user_id):
-    service = AgentThreadService(database, history_limit=10)
+    service = AgentThreadService(database)
     saved = service.save(
         user_id,
         [HumanMessage(content="Remember this"), AIMessage(content="I will")],
         expected_version=None,
         now_utc=NOW,
+        context_summary="The user wants this remembered.",
+        compression_step_count=4,
     )
     assert saved.version == 1
 
-    restarted = AgentThreadService(database, history_limit=10).load(user_id)
+    restarted = AgentThreadService(database).load(user_id)
     assert [message.content for message in restarted.messages] == [
         "Remember this",
         "I will",
     ]
+    assert restarted.context_summary == "The user wants this remembered."
+    assert restarted.compression_step_count == 4
+
+
+def test_agent_thread_service_does_not_slice_individual_messages(database, user_id):
+    service = AgentThreadService(database)
+    messages = [HumanMessage(content=f"Message {index}") for index in range(150)]
+
+    service.save(
+        user_id,
+        messages,
+        expected_version=None,
+        now_utc=NOW,
+    )
+
+    assert len(service.load(user_id).messages) == 150
 
 
 def test_tool_execution_replay_does_not_create_duplicate_task(database, user_id):

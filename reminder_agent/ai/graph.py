@@ -13,12 +13,24 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph
 
+from reminder_agent.ai.compression import (
+    CompressionConfig,
+    compression_config_from_settings,
+    count_prompt_tokens,
+    count_text_tokens,
+    count_tool_schema_tokens,
+    ensure_tool_call_integrity,
+    historical_summary_message,
+    prepare_compression,
+    update_context_summary,
+)
 from reminder_agent.ai.prompt import build_system_prompt
 from reminder_agent.ai.safety import sanitize_untrusted_content
 from reminder_agent.ai.state import AgentState
 from reminder_agent.ai.tools import tool_result_persists
 from reminder_agent.ai.tools.registry import ToolContext, ToolRegistry
 from reminder_agent.clock import utc_now
+from reminder_agent.config import Settings
 from reminder_agent.services.agent_threads import AgentThreadService
 
 
@@ -48,10 +60,10 @@ async def _agent_node(
         state.get("request_id") or "-",
     )
 
-    invocation = [
-        SystemMessage(content=build_system_prompt(dict(state))),
-        *state["messages"],
-    ]
+    invocation = [SystemMessage(content=build_system_prompt(dict(state)))]
+    if state.get("context_summary", "").strip():
+        invocation.append(historical_summary_message(state["context_summary"]))
+    invocation.extend(state["messages"])
     model = model_with_tools if tool_round < tool_limit else model_without_tools
     if tool_round >= tool_limit:
         invocation.append(
@@ -87,19 +99,24 @@ async def _agent_node(
             )
     logger.info(LOG_SEPARATOR)
 
+    next_messages = [*state["messages"], response]
+    compression_step_count = state.get("compression_step_count", 0) + 1
     update = {
-        "messages": [response],
+        "messages": next_messages,
         "model_round_count": model_round + 1,
+        "compression_step_count": compression_step_count,
     }
     if thread_service is not None:
         saved = thread_service.save(
             state["user_id"],
             _durable_messages(
-                [*state["messages"], response],
+                next_messages,
                 registry=registry,
             ),
             expected_version=state.get("thread_version"),
             now_utc=clock(),
+            context_summary=state.get("context_summary", ""),
+            compression_step_count=compression_step_count,
         )
         update["thread_version"] = saved.version
     return update
@@ -180,8 +197,9 @@ async def _tool_node(
         logger.info(LOG_SEPARATOR)
 
     now = clock()
+    next_messages = [*state["messages"], *tool_messages]
     update = {
-        "messages": tool_messages,
+        "messages": next_messages,
         "tool_round_count": state.get("tool_round_count", 0) + 1,
         "now_utc": now.isoformat(),
         "now_local": now.astimezone(ZoneInfo(state["timezone"])).isoformat(),
@@ -191,42 +209,169 @@ async def _tool_node(
         saved = thread_service.save(
             state["user_id"],
             _durable_messages(
-                [*state["messages"], *tool_messages],
+                next_messages,
                 registry=registry,
             ),
             expected_version=state.get("thread_version"),
             now_utc=now,
+            context_summary=state.get("context_summary", ""),
+            compression_step_count=state.get("compression_step_count", 0),
         )
         update["thread_version"] = saved.version
     return update
 
 
-def _route_after_agent(state: AgentState) -> Literal["tools", "end"]:
+async def _route_after_agent(state: AgentState) -> Literal["tools", "end"]:
     last = state["messages"][-1]
     if isinstance(last, AIMessage) and last.tool_calls:
         return "tools"
     return "end"
 
 
-def _route_from_start(state: AgentState) -> Literal["agent", "tools"]:
+async def _route_from_start(
+    state: AgentState,
+) -> Literal["compress_prepare", "tools"]:
     if state.get("messages"):
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:
             return "tools"
-    return "agent"
+    return "compress_prepare"
+
+
+async def _compress_prepare_node(
+    state: AgentState,
+    *,
+    tool_schema_tokens: int,
+    compression_config: CompressionConfig,
+) -> dict[str, Any]:
+    prepared = prepare_compression(
+        messages=state["messages"],
+        context_summary=state.get("context_summary", ""),
+        compression_step_count=state.get("compression_step_count", 0),
+        system_prompt=build_system_prompt(dict(state)),
+        tool_schema_tokens=tool_schema_tokens,
+        config=compression_config,
+    )
+    if prepared is None:
+        return {
+            "compression_prepared_result": None,
+            "memory_rewrite_status": None,
+        }
+    logger.info(
+        "[COMPRESSION] Prepared reasons=%s tokens=%s->%s turns=%s removed=%s",
+        ",".join(prepared["trigger_reasons"]),
+        prepared["tokens_before"],
+        prepared["projected_tokens"],
+        prepared["turns_before"],
+        prepared["turns_removed"],
+    )
+    return {
+        "compression_prepared_result": prepared,
+        "memory_rewrite_status": None,
+    }
+
+
+async def _route_after_compress_prepare(
+    state: AgentState,
+) -> Literal["agent", "memory_chat"]:
+    if state.get("compression_prepared_result") is None:
+        return "agent"
+    return "memory_chat"
+
+
+async def _memory_chat_node(
+    state: AgentState,
+    *,
+    model_without_tools: Any,
+    compression_config: CompressionConfig,
+) -> dict[str, Any]:
+    prepared = state.get("compression_prepared_result")
+    if prepared is None:
+        raise RuntimeError("memory_chat called without a prepared compression result.")
+    summary_exchanges = prepared.get("summary_exchanges", [])
+    summary = await update_context_summary(
+        model=model_without_tools,
+        existing_summary=str(prepared.get("context_summary", "")),
+        exchanges=summary_exchanges,
+        config=compression_config,
+    )
+    return {
+        "compression_prepared_result": {
+            **prepared,
+            "context_summary": summary,
+        },
+        "memory_rewrite_status": (
+            "updated" if summary_exchanges else "unchanged"
+        ),
+    }
+
+
+async def _compress_commit_node(
+    state: AgentState,
+    *,
+    registry: ToolRegistry,
+    tool_schema_tokens: int,
+    compression_config: CompressionConfig,
+    thread_service: AgentThreadService | None,
+    clock: Callable[[], datetime],
+) -> dict[str, Any]:
+    prepared = state.get("compression_prepared_result")
+    if prepared is None:
+        raise RuntimeError("compress_commit called without a prepared result.")
+    messages = list(prepared["messages"])
+    context_summary = str(prepared.get("context_summary", ""))
+    ensure_tool_call_integrity(messages)
+    final_tokens = count_prompt_tokens(
+        system_prompt=build_system_prompt(dict(state)),
+        context_summary=context_summary,
+        messages=messages,
+        tool_schema_tokens=tool_schema_tokens,
+    )
+    if final_tokens > compression_config.token_threshold:
+        raise RuntimeError(
+            "Compressed conversation still exceeds the token threshold: "
+            f"{final_tokens} > {compression_config.token_threshold}."
+        )
+
+    update: dict[str, Any] = {
+        "messages": messages,
+        "context_summary": context_summary,
+        "compression_step_count": 0,
+        "compression_prepared_result": None,
+    }
+    if thread_service is not None:
+        saved = thread_service.save(
+            state["user_id"],
+            _durable_messages(messages, registry=registry),
+            expected_version=state.get("thread_version"),
+            now_utc=clock(),
+            context_summary=context_summary,
+            compression_step_count=0,
+        )
+        update["thread_version"] = saved.version
+    logger.info(
+        "[COMPRESSION] Committed tokens=%s summary_tokens=%s",
+        final_tokens,
+        count_text_tokens(context_summary),
+    )
+    return update
 
 
 def create_reminder_agent(
     *,
+    settings: Settings,
     model: Any,
     registry: ToolRegistry,
     clock: Callable[[], datetime] = utc_now,
-    retry_attempts: int = 1,
-    log_private_content: bool = False,
     thread_service: AgentThreadService | None = None,
 ):
+    retry_attempts = settings.llm_retry_attempts
+    log_private_content = settings.log_private_content
+    compression_config = compression_config_from_settings(settings)
+    registry_schemas = registry.schemas()
+    tool_schema_tokens = count_tool_schema_tokens(registry_schemas)
     model_with_tools = model.bind_tools(
-        registry.schemas(),
+        registry_schemas,
         parallel_tool_calls=False,
     ).with_retry(stop_after_attempt=max(1, retry_attempts + 1))
     model_without_tools = model.with_retry(
@@ -247,6 +392,33 @@ def create_reminder_agent(
         ),
     )
     graph.add_node(
+        "compress_prepare",
+        partial(
+            _compress_prepare_node,
+            tool_schema_tokens=tool_schema_tokens,
+            compression_config=compression_config,
+        ),
+    )
+    graph.add_node(
+        "memory_chat",
+        partial(
+            _memory_chat_node,
+            model_without_tools=model_without_tools,
+            compression_config=compression_config,
+        ),
+    )
+    graph.add_node(
+        "compress_commit",
+        partial(
+            _compress_commit_node,
+            registry=registry,
+            tool_schema_tokens=tool_schema_tokens,
+            compression_config=compression_config,
+            thread_service=thread_service,
+            clock=clock,
+        ),
+    )
+    graph.add_node(
         "tools",
         partial(
             _tool_node,
@@ -259,14 +431,21 @@ def create_reminder_agent(
     graph.add_conditional_edges(
         START,
         _route_from_start,
-        {"agent": "agent", "tools": "tools"},
+        {"compress_prepare": "compress_prepare", "tools": "tools"},
     )
+    graph.add_conditional_edges(
+        "compress_prepare",
+        _route_after_compress_prepare,
+        {"agent": "agent", "memory_chat": "memory_chat"},
+    )
+    graph.add_edge("memory_chat", "compress_commit")
+    graph.add_edge("compress_commit", "agent")
     graph.add_conditional_edges(
         "agent",
         _route_after_agent,
         {"tools": "tools", "end": END},
     )
-    graph.add_edge("tools", "agent")
+    graph.add_edge("tools", "compress_prepare")
     return graph.compile()
 
 
@@ -279,6 +458,8 @@ def initial_state(
     tool_round_limit: int,
     request_id: str | None = None,
     thread_version: int | None = None,
+    context_summary: str = "",
+    compression_step_count: int = 0,
 ) -> AgentState:
     return {
         "messages": _durable_messages(messages),
@@ -292,6 +473,10 @@ def initial_state(
         "errors": [],
         "request_id": request_id,
         "thread_version": thread_version,
+        "context_summary": context_summary,
+        "compression_step_count": compression_step_count,
+        "compression_prepared_result": None,
+        "memory_rewrite_status": None,
     }
 
 

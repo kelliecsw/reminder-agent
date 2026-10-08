@@ -15,6 +15,7 @@ from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
+from reminder_agent.services.agent_threads import AgentThreadService
 from reminder_agent.services.users import UserService
 from reminder_agent.telegram.accounts import TelegramAccountService
 from reminder_agent.telegram.gateway import require_telegram_settings
@@ -34,15 +35,16 @@ def run_telegram_polling(database: Database, settings: Settings) -> None:
     goals = GoalService(database)
     reminders = ReminderService(database)
     deliveries = DeliveryService(database)
+    threads = AgentThreadService(database)
     graph = create_reminder_agent(
+        settings=settings,
         model=create_model(settings),
         registry=create_tool_registry(
             tasks=tasks,
             goals=goals,
             reminders=reminders,
         ),
-        retry_attempts=settings.llm_retry_attempts,
-        log_private_content=settings.log_private_content,
+        thread_service=threads,
     )
     processor = TelegramProcessor(
         accounts=TelegramAccountService(
@@ -58,6 +60,7 @@ def run_telegram_polling(database: Database, settings: Settings) -> None:
         delivery_actions=DeliveryActionService(database),
         graph=graph,
         tool_round_limit=settings.llm_tool_round_limit,
+        thread_service=threads,
         log_private_content=settings.log_private_content,
     )
 

@@ -11,7 +11,8 @@ class AgentThreadRepository:
     def get(self, conn: sqlite3.Connection, user_id: int) -> AgentThread | None:
         row = conn.execute(
             """
-            SELECT application_user_id, messages_json, version
+            SELECT application_user_id, messages_json, context_summary,
+                   compression_step_count, version
             FROM agent_threads WHERE application_user_id = ?
             """,
             (user_id,),
@@ -21,6 +22,8 @@ class AgentThreadRepository:
         return AgentThread(
             application_user_id=int(row["application_user_id"]),
             messages=json.loads(row["messages_json"]),
+            context_summary=str(row["context_summary"]),
+            compression_step_count=int(row["compression_step_count"]),
             version=int(row["version"]),
         )
 
@@ -37,14 +40,17 @@ class AgentThreadRepository:
             cursor = conn.execute(
                 """
                 INSERT INTO agent_threads (
-                    application_user_id, messages_json,
+                    application_user_id, messages_json, context_summary,
+                    compression_step_count,
                     version, created_at_utc, updated_at_utc
-                ) VALUES (?, ?, 1, ?, ?)
+                ) VALUES (?, ?, ?, ?, 1, ?, ?)
                 ON CONFLICT(application_user_id) DO NOTHING
                 """,
                 (
                     thread.application_user_id,
                     messages,
+                    thread.context_summary,
+                    thread.compression_step_count,
                     now_utc.isoformat(),
                     now_utc.isoformat(),
                 ),
@@ -54,18 +60,23 @@ class AgentThreadRepository:
             return AgentThread(
                 application_user_id=thread.application_user_id,
                 messages=thread.messages,
+                context_summary=thread.context_summary,
+                compression_step_count=thread.compression_step_count,
                 version=1,
             )
         new_version = expected_version + 1
         cursor = conn.execute(
             """
             UPDATE agent_threads
-            SET messages_json = ?, version = ?,
+            SET messages_json = ?, context_summary = ?,
+                compression_step_count = ?, version = ?,
                 updated_at_utc = ?
             WHERE application_user_id = ? AND version = ?
             """,
             (
                 messages,
+                thread.context_summary,
+                thread.compression_step_count,
                 new_version,
                 now_utc.isoformat(),
                 thread.application_user_id,
@@ -77,5 +88,7 @@ class AgentThreadRepository:
         return AgentThread(
             application_user_id=thread.application_user_id,
             messages=thread.messages,
+            context_summary=thread.context_summary,
+            compression_step_count=thread.compression_step_count,
             version=new_version,
         )

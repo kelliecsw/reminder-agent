@@ -182,6 +182,8 @@ class OutboxMessage:
 class AgentThread:
     application_user_id: int
     messages: list[dict[str, Any]]
+    context_summary: str = ""
+    compression_step_count: int = 0
     version: int = 1
 
 
