@@ -10,7 +10,7 @@ from contextlib import suppress
 from telegram import Update
 
 from reminder_agent.ai.graph import create_reminder_agent
-from reminder_agent.ai.model import create_model
+from reminder_agent.ai.model import create_model, probe_model
 from reminder_agent.ai.tools.registry import create_tool_registry
 from reminder_agent.config import Settings
 from reminder_agent.db.database import Database
@@ -77,6 +77,21 @@ async def run(settings: Settings) -> None:
         execution_service=tool_executions,
     )
     model = create_model(settings)
+    try:
+        await probe_model(model)
+    except Exception:
+        logger.exception(
+            "LLM startup probe failed. provider=%s model=%s base_url=%s",
+            settings.llm_provider,
+            settings.llm_model or "default",
+            settings.llm_api_base or "provider default",
+        )
+        raise
+    logger.info(
+        "LLM startup probe succeeded. provider=%s model=%s.",
+        settings.llm_provider,
+        settings.llm_model or "default",
+    )
     graph = create_reminder_agent(
         settings=settings,
         model=model,
