@@ -94,3 +94,60 @@ def test_probe_model_rejects_tool_calls():
     with pytest.raises(RuntimeError, match="unexpectedly returned tool calls"):
         asyncio.run(probe_model(model))
 
+
+def test_openrouter_defaults_include_usage_and_provider_preferences():
+    settings = Settings(
+        _env_file=None,
+        OPENROUTER_API_KEY="secret",
+        llm_provider="router",
+    )
+    with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
+        create_model(settings)
+
+    kwargs = chat.call_args.kwargs
+    assert kwargs["model"] == "anthropic/claude-sonnet-4.6"
+    assert kwargs["base_url"] == "https://openrouter.ai/api/v1"
+    assert kwargs["api_key"] == "secret"
+    assert kwargs["extra_body"] == {
+        "usage": {"include": True},
+        "provider": {"allow_fallbacks": True, "data_collection": "deny"},
+    }
+    assert "reasoning_effort" not in kwargs
+    assert "default_headers" not in kwargs
+
+
+def test_openrouter_custom_model_and_base_url_override():
+    settings = Settings(
+        _env_file=None,
+        OPENROUTER_API_KEY="secret",
+        llm_provider="openrouter",
+        llm_model="openai/gpt-5.1",
+        OPENROUTER_BASE_URL="https://proxy.example.com/v1",
+    )
+    with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
+        create_model(settings)
+
+    kwargs = chat.call_args.kwargs
+    assert kwargs["model"] == "openai/gpt-5.1"
+    assert kwargs["base_url"] == "https://proxy.example.com/v1"
+
+
+def test_openrouter_requires_api_key():
+    settings = Settings(_env_file=None, llm_provider="openrouter")
+
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY is required"):
+        create_model(settings)
+
+
+def test_openrouter_forwards_temperature():
+    settings = Settings(
+        _env_file=None,
+        OPENROUTER_API_KEY="secret",
+        llm_provider="openrouter",
+        llm_temperature=0.2,
+    )
+    with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
+        create_model(settings)
+
+    assert chat.call_args.kwargs["temperature"] == 0.2
+

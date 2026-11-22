@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_provider: Literal["kimicode", "cliproxyapi"] = "kimicode"
+    llm_provider: Literal["kimicode", "cliproxyapi", "openrouter"] = "kimicode"
     llm_model: str | None = None
     llm_api_base: str | None = None
     llm_max_tokens: int = Field(default=8_000, ge=1)
@@ -59,6 +59,11 @@ class Settings(BaseSettings):
 
     kimicode_api_key: SecretStr | None = None
     cliproxyapi_api_key: SecretStr = SecretStr("cliproxyapi")
+    openrouter_api_key: SecretStr | None = None
+
+    kimicode_base_url: str | None = None
+    cliproxyapi_base_url: str | None = None
+    openrouter_base_url: str | None = None
 
     @field_validator("llm_provider", mode="before")
     @classmethod
@@ -67,6 +72,7 @@ class Settings(BaseSettings):
             "kimi": "kimicode",
             "kimicli": "kimicode",
             "proxy": "cliproxyapi",
+            "router": "openrouter",
         }
         normalized = str(value).strip().lower()
         return aliases.get(normalized, normalized)
