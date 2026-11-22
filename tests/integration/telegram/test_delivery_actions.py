@@ -77,17 +77,28 @@ def _sent_goal_delivery(database, user_id, schedule):
 
 
 @pytest.mark.parametrize(
-    ("schedule", "expected_reminder_status"),
+    ("schedule", "expected_reminder_status", "expected_task_status"),
     [
-        pytest.param(ONE_OFF_SCHEDULE, ReminderStatus.COMPLETED, id="one-off"),
-        pytest.param(RECURRING_SCHEDULE, ReminderStatus.ACTIVE, id="recurring"),
+        pytest.param(
+            ONE_OFF_SCHEDULE,
+            ReminderStatus.COMPLETED,
+            TaskStatus.COMPLETED,
+            id="one-off",
+        ),
+        pytest.param(
+            RECURRING_SCHEDULE,
+            ReminderStatus.ACTIVE,
+            TaskStatus.ACTIVE,
+            id="recurring",
+        ),
     ],
 )
-def test_done_marks_only_task_reminder_occurrence(
+def test_done_completes_task_only_when_reminder_series_exhausted(
     database,
     user_id,
     schedule,
     expected_reminder_status,
+    expected_task_status,
 ):
     task, reminder, delivery = _sent_task_delivery(database, user_id, schedule)
 
@@ -95,7 +106,12 @@ def test_done_marks_only_task_reminder_occurrence(
 
     assert result.reminder_purpose == ReminderPurpose.TASK_REMINDER
     assert result.delivery.status == DeliveryStatus.ACTED_ON
-    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+    assert TaskService(database).list(user_id)[0].status == expected_task_status
+    assert result.task_completed is (
+        expected_task_status is TaskStatus.COMPLETED
+    )
+    if result.task_completed:
+        assert result.task_title == task.title
     saved_reminder = ReminderService(database).get(user_id, reminder.id)
     assert saved_reminder.status == expected_reminder_status
 
@@ -139,7 +155,7 @@ def test_done_records_progress_for_goal_reminder_occurrence(
     assert saved_reminder.status == expected_reminder_status
 
 
-def test_done_on_final_recurring_occurrence_does_not_complete_task(
+def test_done_on_final_recurring_occurrence_completes_task(
     database,
     user_id,
 ):
@@ -152,7 +168,9 @@ def test_done_on_final_recurring_occurrence_does_not_complete_task(
     result = DeliveryActionService(database).done(user_id, delivery.id)
 
     assert result.delivery.status == DeliveryStatus.ACTED_ON
-    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.COMPLETED
+    assert result.task_completed is True
+    assert result.task_title == task.title
     assert (
         ReminderService(database).get(user_id, reminder.id).status
         == ReminderStatus.COMPLETED

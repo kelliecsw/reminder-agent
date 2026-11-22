@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -12,13 +13,14 @@ from reminder_agent.domain.enums import (
     GoalStatus,
     ReminderPurpose,
     ReminderStatus,
+    TaskStatus,
 )
 from reminder_agent.domain.errors import (
     InvalidOwnershipError,
     InvalidStateTransitionError,
     NotFoundError,
 )
-from reminder_agent.domain.models import Delivery, GoalProgress
+from reminder_agent.domain.models import Delivery, GoalProgress, Reminder, Task
 from reminder_agent.repositories.deliveries import DeliveryRepository
 from reminder_agent.repositories.goal_progress import GoalProgressRepository
 from reminder_agent.repositories.goals import GoalRepository
@@ -31,6 +33,8 @@ from reminder_agent.repositories.users import UserRepository
 class DoneResult:
     delivery: Delivery
     reminder_purpose: ReminderPurpose
+    task_completed: bool = False
+    task_title: str | None = None
 
 
 class DeliveryActionService:
@@ -76,9 +80,18 @@ class DeliveryActionService:
                     )
                 updated = replace(delivery, status=DeliveryStatus.ACTED_ON)
                 self.delivery_repo.update(conn, updated)
+                task_completed = False
+                task_title = None
+                if self._exhausts_task(conn, user_id, task, reminder, updated):
+                    completed_task = replace(task, status=TaskStatus.COMPLETED)
+                    self.task_repo.update(conn, completed_task)
+                    task_completed = True
+                    task_title = task.title
                 return DoneResult(
                     delivery=updated,
                     reminder_purpose=ReminderPurpose.TASK_REMINDER,
+                    task_completed=task_completed,
+                    task_title=task_title,
                 )
 
             if reminder.goal_id is None:
@@ -111,6 +124,37 @@ class DeliveryActionService:
                 delivery=updated,
                 reminder_purpose=ReminderPurpose.GOAL_REMINDER,
             )
+
+    def _exhausts_task(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+        task: Task,
+        reminder: Reminder,
+        acted_delivery: Delivery,
+    ) -> bool:
+        """Whether this done marks the task's last outstanding reminder work."""
+        if task.status is not TaskStatus.ACTIVE:
+            return False
+        if reminder.status is not ReminderStatus.COMPLETED:
+            return False
+        siblings = [
+            sibling
+            for sibling in self.reminder_repo.list_by_user(conn, user_id)
+            if sibling.task_id == task.id and sibling.id != reminder.id
+        ]
+        if any(
+            sibling.status in {ReminderStatus.ACTIVE, ReminderStatus.PAUSED}
+            for sibling in siblings
+        ):
+            return False
+        sibling_ids = {sibling.id for sibling in siblings}
+        return not any(
+            delivery.reminder_id in sibling_ids
+            or delivery.reminder_id == reminder.id
+            for delivery in self.delivery_repo.list_open_by_user(conn, user_id)
+            if delivery.id != acted_delivery.id
+        )
 
     def pause_reminder_from_delivery(
         self,

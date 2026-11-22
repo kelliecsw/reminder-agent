@@ -421,6 +421,197 @@ def test_done_callback_marks_only_the_task_reminder_occurrence(database, user_id
     assert bot.messages[-1]["text"] == "Marked this reminder occurrence done."
 
 
+def test_done_callback_completes_task_for_last_single_occurrence_reminder(
+    database,
+    user_id,
+):
+    task = TaskService(database).create(user_id, "Drink water")
+    ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    bot = FakeBot()
+    update = _callback_update(f"d:{delivery.id}:done")
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            update,
+            SimpleNamespace(bot=bot),
+        )
+    )
+
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.COMPLETED
+    assert "task 'Drink water' completed" in bot.messages[-1]["text"]
+
+
+def test_done_callback_completes_task_only_after_its_last_reminder(
+    database,
+    user_id,
+):
+    task = TaskService(database).create(user_id, "Submit report")
+    reminder_service = ReminderService(database, clock=lambda: NOW.replace(day=21))
+    schedule = ReminderSchedule(
+        start_date=date(2026, 8, 22),
+        local_time=time(9),
+        timezone="Asia/Singapore",
+    )
+    reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    deliveries = DeliveryService(database)
+    created = ReminderMaterializer(deliveries).run_once(NOW)
+    assert len(created) == 2
+    for _ in created:
+        claimed = deliveries.claim_ready(NOW)
+        deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+
+    bot = FakeBot()
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{created[0].id}:done"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+    assert "completed" not in bot.messages[-1]["text"]
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{created[1].id}:done"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.COMPLETED
+    assert "task 'Submit report' completed" in bot.messages[-1]["text"]
+
+
+def test_done_callback_keeps_task_active_with_paused_sibling_reminder(
+    database,
+    user_id,
+):
+    task = TaskService(database).create(user_id, "Drink water")
+    reminder_service = ReminderService(database, clock=lambda: NOW.replace(day=21))
+    schedule = ReminderSchedule(
+        start_date=date(2026, 8, 22),
+        local_time=time(9),
+        timezone="Asia/Singapore",
+    )
+    reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    paused = reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    reminder_service.pause(user_id, paused.id)
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{delivery.id}:done"),
+            SimpleNamespace(bot=FakeBot()),
+        )
+    )
+
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+
+
+def test_done_callback_keeps_task_active_with_snoozed_sibling_delivery(
+    database,
+    user_id,
+):
+    task = TaskService(database).create(user_id, "Drink water")
+    reminder_service = ReminderService(database, clock=lambda: NOW.replace(day=21))
+    schedule = ReminderSchedule(
+        start_date=date(2026, 8, 22),
+        local_time=time(9),
+        timezone="Asia/Singapore",
+    )
+    reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    reminder_service.create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=schedule,
+    )
+    deliveries = DeliveryService(database)
+    created = ReminderMaterializer(deliveries).run_once(NOW)
+    assert len(created) == 2
+    for _ in created:
+        claimed = deliveries.claim_ready(NOW)
+        deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    deliveries.snooze(user_id, created[1].id, NOW + timedelta(minutes=10))
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{created[0].id}:done"),
+            SimpleNamespace(bot=FakeBot()),
+        )
+    )
+
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.ACTIVE
+
+
+def test_done_callback_never_completes_paused_task(database, user_id):
+    task = TaskService(database).create(user_id, "Drink water")
+    ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+        ),
+    )
+    TaskService(database).pause(user_id, task.id)
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{delivery.id}:done"),
+            SimpleNamespace(bot=FakeBot()),
+        )
+    )
+
+    assert TaskService(database).list(user_id)[0].status == TaskStatus.PAUSED
+
+
 def test_replayed_callback_does_not_repeat_mutation(database, user_id):
     task = TaskService(database).create(user_id, "Submit report")
     ReminderService(database, clock=lambda: NOW.replace(day=21)).create(

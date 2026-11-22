@@ -414,11 +414,17 @@ class TelegramProcessor:
                 raise ValueError("Invalid button resource.")
             if action == "done":
                 result = self.delivery_actions.done(user_id, resource_id)
-                response = (
-                    "Marked this reminder occurrence done and recorded goal progress."
-                    if result.reminder_purpose == ReminderPurpose.GOAL_REMINDER
-                    else "Marked this reminder occurrence done."
-                )
+                if result.task_completed:
+                    response = (
+                        "Marked this reminder occurrence done — task "
+                        f"'{result.task_title}' completed."
+                    )
+                elif result.reminder_purpose == ReminderPurpose.GOAL_REMINDER:
+                    response = (
+                        "Marked this reminder occurrence done and recorded goal progress."
+                    )
+                else:
+                    response = "Marked this reminder occurrence done."
                 return {"response": response}
             if action == "skip":
                 self.deliveries.skip(user_id, resource_id)
