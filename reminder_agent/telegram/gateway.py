@@ -36,7 +36,7 @@ class TelegramGateway:
             )
         await self.bot.send_message(
             chat_id=account.telegram_chat_id,
-            text=f"🔔 {text}",
+            text=text,
             reply_markup=reminder_actions(delivery_id),
         )
 

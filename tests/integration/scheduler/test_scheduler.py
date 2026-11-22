@@ -85,7 +85,7 @@ def test_one_off_reminder_is_materialized_and_sent(database, user_id):
         SentMessage(
             delivery_id=created[0].id,
             user_id=user_id,
-            text="Submit claim",
+            text="🔔 Submit claim",
         )
     ]
     assert deliveries.get(user_id, created[0].id).status == DeliveryStatus.SENT
@@ -278,12 +278,12 @@ def test_snooze_changes_delivery_time_without_changing_occurrence(database, user
         SentMessage(
             delivery_id=created.id,
             user_id=user_id,
-            text="Submit claim",
+            text="🔔 Submit claim",
         ),
         SentMessage(
             delivery_id=created.id,
             user_id=user_id,
-            text="Submit claim",
+            text="🔔 Submit claim",
         ),
     ]
 
@@ -300,5 +300,5 @@ def test_pending_delivery_survives_database_restart(database, user_id):
         DeliveryWorker(DeliveryService(restarted), gateway).run_once(START_UTC)
     )
     assert gateway.messages == [
-        SentMessage(delivery_id=1, user_id=user_id, text="Submit claim")
+        SentMessage(delivery_id=1, user_id=user_id, text="🔔 Submit claim")
     ]

@@ -87,7 +87,7 @@ class OutboxService:
                     ),
                     application_user_id=message.user_id,
                     delivery_id=delivery_id,
-                    text=f"🔔 {message.text}",
+                    text=message.text,
                     keyboard=reminder_actions(delivery_id).to_dict(),
                     next_attempt_at_utc=now_utc,
                 ),

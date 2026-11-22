@@ -191,7 +191,7 @@ class DeliveryService:
                     and goal.user_id == delivery.user_id
                     and goal.status not in {GoalStatus.COMPLETED, GoalStatus.CANCELLED}
                 ):
-                    text = f"Goal reminder: {goal.title}"
+                    text = goal.title
 
             if text is None:
                 self.delivery_repo.update(
@@ -209,7 +209,7 @@ class DeliveryService:
             return DeliveryMessage(
                 delivery_id=delivery_id,
                 user_id=delivery.user_id,
-                text=text,
+                text=f"🔔 {text}",
             )
 
     def mark_sent(

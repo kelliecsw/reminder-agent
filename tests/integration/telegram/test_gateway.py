@@ -69,7 +69,7 @@ def test_telegram_gateway_resolves_chat_and_adds_buttons(database, user_id):
     assert len(bot.messages) == 1
     sent = bot.messages[0]
     assert sent["chat_id"] == 54321
-    assert sent["text"] == "🔔 Submit claim"
+    assert sent["text"] == "Submit claim"
     assert sent["reply_markup"].inline_keyboard[0][0].callback_data == "d:42:done"
 
 
