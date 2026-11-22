@@ -19,7 +19,7 @@ _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 def _settings(**overrides) -> Settings:
     values: dict[str, object] = {
-        "OPENROUTER_API_KEY": "secret",
+        "LLM_API_KEY": "secret",
         "llm_provider": "openrouter",
     }
     values.update(overrides)
@@ -192,7 +192,7 @@ def test_ensure_model_available_memoizes_and_refetches_on_identity_change():
         asyncio.run(ensure_model_available(settings))
     assert len(requests) == 1
 
-    rotated = _settings(llm_model="model-a", OPENROUTER_API_KEY="rotated")
+    rotated = _settings(llm_model="model-a", LLM_API_KEY="rotated")
     with _use_transport(transport):
         asyncio.run(ensure_model_available(rotated))
     assert len(requests) == 2

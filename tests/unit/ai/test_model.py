@@ -11,7 +11,7 @@ from reminder_agent.config import Settings
 def test_kimi_defaults_to_k3_with_provider_requirements():
     settings = Settings(
         _env_file=None,
-        KIMICODE_API_KEY="secret",
+        LLM_API_KEY="secret",
         llm_provider="kimi",
     )
     with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
@@ -42,6 +42,18 @@ def test_cliproxy_gpt5_uses_session_and_effort_without_temperature():
     assert kwargs["default_headers"]["Session_id"].startswith("reminder-agent-")
     assert kwargs["reasoning_effort"] == "high"
     assert "temperature" not in kwargs
+
+
+def test_cliproxy_prefers_llm_api_key_over_default():
+    settings = Settings(
+        _env_file=None,
+        llm_provider="cliproxyapi",
+        LLM_API_KEY="custom-key",
+    )
+    with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
+        create_model(settings)
+
+    assert chat.call_args.kwargs["api_key"] == "custom-key"
 
 
 def test_cliproxy_non_reasoning_model_keeps_temperature():
@@ -98,7 +110,7 @@ def test_probe_model_rejects_tool_calls():
 def test_openrouter_defaults_include_usage_and_provider_preferences():
     settings = Settings(
         _env_file=None,
-        OPENROUTER_API_KEY="secret",
+        LLM_API_KEY="secret",
         llm_provider="router",
     )
     with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
@@ -119,10 +131,10 @@ def test_openrouter_defaults_include_usage_and_provider_preferences():
 def test_openrouter_custom_model_and_base_url_override():
     settings = Settings(
         _env_file=None,
-        OPENROUTER_API_KEY="secret",
+        LLM_API_KEY="secret",
         llm_provider="openrouter",
         llm_model="openai/gpt-5.1",
-        OPENROUTER_BASE_URL="https://proxy.example.com/v1",
+        LLM_API_BASE="https://proxy.example.com/v1",
     )
     with patch("reminder_agent.ai.model.ChatOpenAI") as chat:
         create_model(settings)
@@ -135,14 +147,14 @@ def test_openrouter_custom_model_and_base_url_override():
 def test_openrouter_requires_api_key():
     settings = Settings(_env_file=None, llm_provider="openrouter")
 
-    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY is required"):
+    with pytest.raises(RuntimeError, match="LLM_API_KEY is required"):
         create_model(settings)
 
 
 def test_openrouter_forwards_temperature():
     settings = Settings(
         _env_file=None,
-        OPENROUTER_API_KEY="secret",
+        LLM_API_KEY="secret",
         llm_provider="openrouter",
         llm_temperature=0.2,
     )

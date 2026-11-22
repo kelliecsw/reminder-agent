@@ -33,7 +33,7 @@ def create_model(settings: Settings) -> ChatOpenAI:
 def _create_kimi_model(settings: Settings) -> ChatOpenAI:
     api_key = resolve_api_key(settings, "kimicode")
     if api_key is None:
-        raise RuntimeError("KIMICODE_API_KEY is required for the Kimi Code provider.")
+        raise RuntimeError("LLM_API_KEY is required for the Kimi Code provider.")
     return ChatOpenAI(
         model=settings.llm_model or PROVIDERS["kimicode"].default_model,
         api_key=api_key.get_secret_value(),
@@ -71,7 +71,7 @@ def _create_openrouter_model(settings: Settings) -> ChatOpenAI:
     api_key = resolve_api_key(settings, "openrouter")
     if api_key is None:
         raise RuntimeError(
-            "OPENROUTER_API_KEY is required for the OpenRouter provider."
+            "LLM_API_KEY is required for the OpenRouter provider."
         )
     return ChatOpenAI(
         model=settings.llm_model or PROVIDERS["openrouter"].default_model,

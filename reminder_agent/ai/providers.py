@@ -14,9 +14,7 @@ class ProviderDefinition:
     key: str
     label: str
     aliases: tuple[str, ...]
-    api_key_env: str
-    settings_api_key_field: str
-    settings_base_url_field: str
+    default_api_key: str | None
     default_base_url: str
     default_model: str
     live_models: bool
@@ -27,9 +25,7 @@ _PROVIDER_DEFINITIONS = (
         key="kimicode",
         label="Kimi Code",
         aliases=("kimi", "kimicli"),
-        api_key_env="KIMICODE_API_KEY",
-        settings_api_key_field="kimicode_api_key",
-        settings_base_url_field="kimicode_base_url",
+        default_api_key=None,
         default_base_url="https://api.kimi.com/coding/v1",
         default_model="k3",
         live_models=True,
@@ -38,9 +34,7 @@ _PROVIDER_DEFINITIONS = (
         key="cliproxyapi",
         label="CLIProxyAPI",
         aliases=("proxy",),
-        api_key_env="CLIPROXYAPI_API_KEY",
-        settings_api_key_field="cliproxyapi_api_key",
-        settings_base_url_field="cliproxyapi_base_url",
+        default_api_key="cliproxyapi",
         default_base_url="http://cli-proxy-api:8317/v1",
         default_model="gpt-5.6-sol",
         live_models=True,
@@ -49,9 +43,7 @@ _PROVIDER_DEFINITIONS = (
         key="openrouter",
         label="OpenRouter",
         aliases=("router", "openrouter"),
-        api_key_env="OPENROUTER_API_KEY",
-        settings_api_key_field="openrouter_api_key",
-        settings_base_url_field="openrouter_base_url",
+        default_api_key=None,
         default_base_url="https://openrouter.ai/api/v1",
         default_model="anthropic/claude-sonnet-4.6",
         live_models=True,
@@ -81,16 +73,17 @@ def normalize_provider_name(provider: str) -> str:
 
 def resolve_base_url(settings: Settings, provider: str) -> str:
     """Resolve the provider base URL from settings or the provider default."""
-    definition = PROVIDERS[provider]
-    override = getattr(settings, definition.settings_base_url_field, None)
-    if override:
-        return override
-    return settings.llm_api_base or definition.default_base_url
+    return settings.llm_api_base or PROVIDERS[provider].default_base_url
 
 
 def resolve_api_key(settings: Settings, provider: str) -> SecretStr | None:
-    """Return the provider API key from settings, or None when unset."""
-    return getattr(settings, PROVIDERS[provider].settings_api_key_field, None)
+    """Return the active provider's API key from settings or its default."""
+    definition = PROVIDERS[provider]
+    if settings.llm_api_key is not None:
+        return settings.llm_api_key
+    if definition.default_api_key is not None:
+        return SecretStr(definition.default_api_key)
+    return None
 
 
 __all__ = [

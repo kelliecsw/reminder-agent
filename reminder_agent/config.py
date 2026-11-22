@@ -57,13 +57,7 @@ class Settings(BaseSettings):
     telegram_owner_user_id: int | None = Field(default=None, ge=1)
     telegram_application_user_id: int = Field(default=1, ge=1)
 
-    kimicode_api_key: SecretStr | None = None
-    cliproxyapi_api_key: SecretStr = SecretStr("cliproxyapi")
-    openrouter_api_key: SecretStr | None = None
-
-    kimicode_base_url: str | None = None
-    cliproxyapi_base_url: str | None = None
-    openrouter_base_url: str | None = None
+    llm_api_key: SecretStr | None = None
 
     @field_validator("llm_provider", mode="before")
     @classmethod
@@ -76,6 +70,14 @@ class Settings(BaseSettings):
         }
         normalized = str(value).strip().lower()
         return aliases.get(normalized, normalized)
+
+    @field_validator("llm_api_key", mode="before")
+    @classmethod
+    def empty_api_key_to_none(cls, value: object) -> object:
+        """Treat an empty LLM_API_KEY as unset so provider defaults apply."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("default_timezone")
     @classmethod
