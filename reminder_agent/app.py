@@ -10,7 +10,7 @@ from contextlib import suppress
 from telegram import Update
 
 from reminder_agent.ai.graph import create_reminder_agent
-from reminder_agent.ai.model import create_model
+from reminder_agent.ai.model import create_model, probe_model
 from reminder_agent.ai.tools.registry import create_tool_registry
 from reminder_agent.config import Settings
 from reminder_agent.db.database import Database
@@ -63,10 +63,7 @@ async def run(settings: Settings) -> None:
     )
     updates = TelegramUpdateService(database)
     outbox = OutboxService(database)
-    threads = AgentThreadService(
-        database,
-        history_limit=settings.history_limit,
-    )
+    threads = AgentThreadService(database)
     tool_executions = ToolExecutionService(database)
     tasks = TaskService(database)
     goals = GoalService(database)
@@ -79,11 +76,26 @@ async def run(settings: Settings) -> None:
         reminders=reminders,
         execution_service=tool_executions,
     )
+    model = create_model(settings)
+    try:
+        await probe_model(model)
+    except Exception:
+        logger.exception(
+            "LLM startup probe failed. provider=%s model=%s base_url=%s",
+            settings.llm_provider,
+            settings.llm_model or "default",
+            settings.llm_api_base or "provider default",
+        )
+        raise
+    logger.info(
+        "LLM startup probe succeeded. provider=%s model=%s.",
+        settings.llm_provider,
+        settings.llm_model or "default",
+    )
     graph = create_reminder_agent(
-        model=create_model(settings),
+        settings=settings,
+        model=model,
         registry=registry,
-        retry_attempts=settings.llm_retry_attempts,
-        log_private_content=settings.log_private_content,
         thread_service=threads,
     )
     processor = TelegramProcessor(

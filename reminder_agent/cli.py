@@ -280,14 +280,15 @@ async def _chat(
         reminders=reminders,
     )
     graph = create_reminder_agent(
+        settings=settings,
         model=create_model(settings),
         registry=registry,
         clock=utc_now,
-        retry_attempts=settings.llm_retry_attempts,
-        log_private_content=settings.log_private_content,
     )
     timezone = UserService(database).get_timezone(user_id)
     history = []
+    context_summary = ""
+    compression_step_count = 0
 
     print(
         f"Chat using {settings.llm_provider}/{settings.llm_model or 'default'}. "
@@ -312,9 +313,13 @@ async def _chat(
                 timezone=timezone,
                 now_utc=now,
                 tool_round_limit=settings.llm_tool_round_limit,
+                context_summary=context_summary,
+                compression_step_count=compression_step_count,
             )
         )
         history = list(result["messages"])
+        context_summary = result.get("context_summary", "")
+        compression_step_count = result.get("compression_step_count", 0)
         response = next(
             (
                 message

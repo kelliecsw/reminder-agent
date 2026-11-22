@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "python-telegram-bot>=22.8",
     "tavily-python>=0.8.1",
+    "tiktoken>=0.14.0",
 ]
 
 [dependency-groups]

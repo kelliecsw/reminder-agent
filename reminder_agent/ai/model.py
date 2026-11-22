@@ -13,7 +13,7 @@ from reminder_agent.config import Settings
 _KIMI_DEFAULT_MODEL = "k3"
 _KIMI_DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
 _CLIPROXY_DEFAULT_MODEL = "gpt-5.6-sol"
-_CLIPROXY_DEFAULT_BASE_URL = "http://localhost:8317/v1"
+_CLIPROXY_DEFAULT_BASE_URL = "http://cli-proxy-api:8317/v1"
 
 _SESSION_ID = f"reminder-agent-{uuid.uuid4().hex[:16]}"
 

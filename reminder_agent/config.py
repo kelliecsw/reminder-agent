@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     llm_tool_round_limit: int = Field(default=6, ge=1)
     log_private_content: bool = False
 
+    agent_token_threshold: int = Field(default=200_000, ge=1)
+    agent_target_tokens: int = Field(default=40_000, ge=1)
+    compression_step_interval: int = Field(default=100, ge=0)
+    compression_turn_trigger: int = Field(default=100, ge=2)
+    compression_turn_target: int = Field(default=25, ge=1)
+    compression_keep_recent_turns: int = Field(default=3, ge=1)
+    compression_summary_max_tokens: int = Field(default=2_000, ge=1)
+    compression_summary_input_tokens: int = Field(default=50_000, ge=1)
+    compression_tool_payload_max_tokens: int = Field(default=200, ge=1)
+
     database_path: Path = Path(".db/reminder-agent.db")
     default_timezone: str = "UTC"
     log_level: str = "INFO"
@@ -36,7 +46,6 @@ class Settings(BaseSettings):
     outbox_poll_seconds: float = Field(default=0.25, gt=0)
     update_max_attempts: int = Field(default=3, ge=1)
     update_retry_base_seconds: float = Field(default=5.0, gt=0)
-    history_limit: int = Field(default=100, ge=1)
     shutdown_timeout_seconds: float = Field(default=15.0, gt=0)
 
     scheduler_poll_seconds: float = Field(default=1.0, gt=0)
@@ -78,3 +87,21 @@ class Settings(BaseSettings):
         if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError(f"Unknown log level: {value}")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_compression_settings(self) -> "Settings":
+        if self.agent_target_tokens >= self.agent_token_threshold:
+            raise ValueError(
+                "AGENT_TARGET_TOKENS must be less than AGENT_TOKEN_THRESHOLD."
+            )
+        if self.compression_turn_target >= self.compression_turn_trigger:
+            raise ValueError(
+                "COMPRESSION_TURN_TARGET must be less than "
+                "COMPRESSION_TURN_TRIGGER."
+            )
+        if self.compression_keep_recent_turns > self.compression_turn_target:
+            raise ValueError(
+                "COMPRESSION_KEEP_RECENT_TURNS must not exceed "
+                "COMPRESSION_TURN_TARGET."
+            )
+        return self

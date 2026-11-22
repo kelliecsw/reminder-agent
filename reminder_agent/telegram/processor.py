@@ -87,6 +87,8 @@ class TelegramProcessor:
         self.tool_execution_service = tool_execution_service
         self.log_private_content = log_private_content
         self.histories: dict[int, list[Any]] = {}
+        self.context_summaries: dict[int, str] = {}
+        self.compression_step_counts: dict[int, int] = {}
 
     async def handle(self, update: Update, context: Any) -> None:
         normalized = normalize_update(update)
@@ -469,12 +471,18 @@ class TelegramProcessor:
         assert item.text is not None
         now = self.clock()
         thread_version = None
+        context_summary = ""
+        compression_step_count = 0
         if self.thread_service is None:
             history = self.histories.get(user_id, [])
+            context_summary = self.context_summaries.get(user_id, "")
+            compression_step_count = self.compression_step_counts.get(user_id, 0)
         else:
             loaded = self.thread_service.load(user_id)
             history = loaded.messages
             thread_version = loaded.version
+            context_summary = loaded.context_summary
+            compression_step_count = loaded.compression_step_count
             source = str(update_id) if update_id is not None else None
             existing_index = next(
                 (
@@ -512,6 +520,8 @@ class TelegramProcessor:
                     [*history, human],
                     expected_version=thread_version,
                     now_utc=now,
+                    context_summary=context_summary,
+                    compression_step_count=compression_step_count,
                 )
                 history = saved.messages
                 thread_version = saved.version
@@ -530,11 +540,18 @@ class TelegramProcessor:
                     f"telegram:{update_id}" if update_id is not None else None
                 ),
                 thread_version=thread_version,
+                context_summary=context_summary,
+                compression_step_count=compression_step_count,
             )
         )
         messages = list(result["messages"])
         if self.thread_service is None:
             self.histories[user_id] = messages
+            self.context_summaries[user_id] = result.get("context_summary", "")
+            self.compression_step_counts[user_id] = result.get(
+                "compression_step_count",
+                0,
+            )
         response = next(
             (
                 message

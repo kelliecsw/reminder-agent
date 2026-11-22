@@ -1,6 +1,10 @@
-from unittest.mock import patch
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from reminder_agent.ai.model import create_model
+import pytest
+
+from reminder_agent.ai.model import create_model, probe_model
 from reminder_agent.config import Settings
 
 
@@ -34,7 +38,7 @@ def test_cliproxy_gpt5_uses_session_and_effort_without_temperature():
 
     kwargs = chat.call_args.kwargs
     assert kwargs["api_key"] == "cliproxyapi"
-    assert kwargs["base_url"] == "http://localhost:8317/v1"
+    assert kwargs["base_url"] == "http://cli-proxy-api:8317/v1"
     assert kwargs["default_headers"]["Session_id"].startswith("reminder-agent-")
     assert kwargs["reasoning_effort"] == "high"
     assert "temperature" not in kwargs
@@ -52,4 +56,41 @@ def test_cliproxy_non_reasoning_model_keeps_temperature():
 
     assert chat.call_args.kwargs["temperature"] == 0.3
     assert "reasoning_effort" not in chat.call_args.kwargs
+
+
+def test_probe_model_accepts_nonempty_response():
+    model = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=SimpleNamespace(content="OK", tool_calls=[]),
+        ),
+    )
+
+    asyncio.run(probe_model(model))
+
+    model.ainvoke.assert_awaited_once()
+
+
+def test_probe_model_rejects_empty_response():
+    model = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=SimpleNamespace(content="", tool_calls=[]),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="empty response"):
+        asyncio.run(probe_model(model))
+
+
+def test_probe_model_rejects_tool_calls():
+    model = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value=SimpleNamespace(
+                content="OK",
+                tool_calls=[{"name": "unexpected"}],
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="unexpectedly returned tool calls"):
+        asyncio.run(probe_model(model))
 
