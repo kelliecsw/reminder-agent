@@ -46,7 +46,8 @@ by a retrying worker.
 ## Docker setup
 
 You need Docker with Compose, a Telegram bot token, your Telegram user ID, and
-credentials for one of the LLM providers listed in `.env.example`.
+credentials for one of the LLM providers listed in `.env.example` (Kimi Code,
+CLIProxyAPI, or OpenRouter).
 
 1. Create the environment file:
 
@@ -56,7 +57,8 @@ credentials for one of the LLM providers listed in `.env.example`.
 
 2. Edit `.env` and configure the following values:
 
-   - Choose and configure one LLM provider.
+   - Choose and configure one LLM provider (`kimicode`, `cliproxyapi`, or
+     `openrouter`).
    - Set `TELEGRAM_BOT_TOKEN` to the token from BotFather.
    - Set `TELEGRAM_OWNER_USER_ID` to your Telegram user ID.
    - Set `DEFAULT_TIMEZONE` to your IANA timezone, such as `Asia/Singapore`.

@@ -14,7 +14,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_provider: Literal["kimicode", "cliproxyapi"] = "kimicode"
+    llm_provider: Literal["kimicode", "cliproxyapi", "openrouter"] = "kimicode"
     llm_model: str | None = None
     llm_api_base: str | None = None
     llm_max_tokens: int = Field(default=8_000, ge=1)
@@ -57,8 +57,7 @@ class Settings(BaseSettings):
     telegram_owner_user_id: int | None = Field(default=None, ge=1)
     telegram_application_user_id: int = Field(default=1, ge=1)
 
-    kimicode_api_key: SecretStr | None = None
-    cliproxyapi_api_key: SecretStr = SecretStr("cliproxyapi")
+    llm_api_key: SecretStr | None = None
 
     @field_validator("llm_provider", mode="before")
     @classmethod
@@ -67,9 +66,18 @@ class Settings(BaseSettings):
             "kimi": "kimicode",
             "kimicli": "kimicode",
             "proxy": "cliproxyapi",
+            "router": "openrouter",
         }
         normalized = str(value).strip().lower()
         return aliases.get(normalized, normalized)
+
+    @field_validator("llm_api_key", mode="before")
+    @classmethod
+    def empty_api_key_to_none(cls, value: object) -> object:
+        """Treat an empty LLM_API_KEY as unset so provider defaults apply."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("default_timezone")
     @classmethod
