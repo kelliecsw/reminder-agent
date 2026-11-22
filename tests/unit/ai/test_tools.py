@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 
 from reminder_agent.ai.tools import (
     GOAL_TOOLS,
@@ -10,6 +10,10 @@ from reminder_agent.ai.tools import (
 )
 from reminder_agent.ai.tools.registry import ToolContext, create_tool_registry
 from reminder_agent.db.database import Database
+from reminder_agent.domain.enums import ReminderPurpose
+from reminder_agent.domain.recurrence import ReminderSchedule
+from reminder_agent.scheduler.materializer import ReminderMaterializer
+from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
@@ -24,6 +28,7 @@ def _registry(database: Database):
         tasks=TaskService(database),
         goals=GoalService(database, clock=lambda: NOW),
         reminders=ReminderService(database, clock=lambda: NOW),
+        deliveries=DeliveryService(database),
     )
 
 
@@ -92,6 +97,7 @@ def test_current_datetime_uses_trusted_clock_and_is_not_persisted(
         tasks=TaskService(database),
         goals=GoalService(database, clock=lambda: NOW),
         reminders=ReminderService(database, clock=lambda: NOW),
+        deliveries=DeliveryService(database),
         execution_service=ToolExecutionService(database),
     )
 
@@ -120,3 +126,45 @@ def test_current_datetime_uses_trusted_clock_and_is_not_persisted(
     with database.connect() as conn:
         count = conn.execute("SELECT COUNT(*) FROM tool_executions").fetchone()[0]
     assert count == 0
+
+
+def test_list_reminders_includes_snoozed_reminders_with_pending_delivery(
+    database: Database,
+    user_id: int,
+):
+    task = TaskService(database).create(user_id, "Drink water")
+    ReminderService(database, clock=lambda: NOW.replace(day=23)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 24),
+            local_time=time(8),
+            timezone="Asia/Singapore",
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    deliveries.snooze(user_id, delivery.id, NOW + timedelta(minutes=10))
+
+    result = _registry(database).execute(
+        name="list_reminders",
+        arguments={},
+        context=ToolContext(
+            user_id=user_id,
+            timezone="Asia/Singapore",
+            now_utc=NOW,
+        ),
+    )
+
+    assert result["status"] == "success"
+    payloads = result["reminders"]
+    assert len(payloads) == 1
+    assert payloads[0]["status"] == "completed"
+    assert payloads[0]["pending_delivery"] == {
+        "status": "retry_wait",
+        "deliver_at_utc": (NOW + timedelta(minutes=10)).isoformat(),
+        "snoozed": True,
+    }

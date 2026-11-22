@@ -8,6 +8,7 @@ from reminder_agent.ai.tools.registry import (
     create_tool_registry,
 )
 from reminder_agent.ai.tools.web import web_search
+from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
@@ -150,6 +151,7 @@ def test_registry_registers_web_tool_that_uses_environment(
         tasks=TaskService(database),
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
     )
 
     result = asyncio.run(

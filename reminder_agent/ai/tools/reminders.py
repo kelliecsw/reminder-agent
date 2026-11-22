@@ -8,8 +8,14 @@ from typing import Annotated, Literal
 from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, ConfigDict, Field
 
-from reminder_agent.domain.enums import Frequency, ReminderPurpose, Weekday
-from reminder_agent.domain.models import Reminder
+from reminder_agent.domain.enums import (
+    DeliveryStatus,
+    Frequency,
+    ReminderPurpose,
+    ReminderStatus,
+    Weekday,
+)
+from reminder_agent.domain.models import Delivery, Reminder
 from reminder_agent.domain.recurrence import (
     RecurrenceRule,
     ReminderSchedule,
@@ -105,10 +111,22 @@ def get_reminder(
 @tool
 def list_reminders(runtime: RuntimeArg) -> dict:
     """List the user's reminders, targets, schedules, and statuses."""
+    pending: dict[int, Delivery] = {}
+    for delivery in runtime.deliveries.list_open(runtime.user_id):
+        current = pending.get(delivery.reminder_id)
+        if current is None or delivery.deliver_at_utc < current.deliver_at_utc:
+            pending[delivery.reminder_id] = delivery
+    reminders = [
+        reminder
+        for reminder in runtime.reminders.list(runtime.user_id)
+        if reminder.status
+        in {ReminderStatus.ACTIVE, ReminderStatus.PAUSED}
+        or reminder.id in pending
+    ]
     return {
         "reminders": [
-            _reminder_payload(reminder)
-            for reminder in runtime.reminders.list(runtime.user_id)
+            _reminder_payload(reminder, pending.get(reminder.id))
+            for reminder in reminders
         ]
     }
 
@@ -185,9 +203,9 @@ def _schedule(args: ScheduleArgs, default_timezone: str) -> ReminderSchedule:
     )
 
 
-def _reminder_payload(reminder: Reminder) -> dict:
+def _reminder_payload(reminder: Reminder, pending: Delivery | None = None) -> dict:
     recurrence = reminder.schedule.recurrence
-    return {
+    payload = {
         "id": reminder.id,
         "purpose": reminder.purpose.value,
         "task_id": reminder.task_id,
@@ -226,6 +244,13 @@ def _reminder_payload(reminder: Reminder) -> dict:
             ),
         },
     }
+    if pending is not None:
+        payload["pending_delivery"] = {
+            "status": pending.status.value,
+            "deliver_at_utc": pending.deliver_at_utc.isoformat(),
+            "snoozed": pending.status is DeliveryStatus.RETRY_WAIT,
+        }
+    return payload
 
 
 _WEEKDAYS = {

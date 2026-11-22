@@ -63,6 +63,11 @@ class DeliveryService:
                 )
             return deliveries
 
+    def list_open(self, user_id: int) -> list[Delivery]:
+        """Return the user's deliveries that have not reached a final status."""
+        with self.database.connect() as conn:
+            return self.delivery_repo.list_open_by_user(conn, user_id)
+
     def materialize_due(
         self,
         now_utc: datetime,

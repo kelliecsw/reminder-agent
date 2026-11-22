@@ -180,6 +180,7 @@ def test_tool_execution_replay_does_not_create_duplicate_task(database, user_id)
         tasks=tasks,
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         execution_service=ToolExecutionService(database),
     )
     context = ToolContext(user_id=user_id, timezone="Asia/Singapore", now_utc=NOW)

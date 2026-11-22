@@ -76,6 +76,7 @@ async def run(settings: Settings) -> None:
         tasks=tasks,
         goals=goals,
         reminders=reminders,
+        deliveries=deliveries,
         execution_service=tool_executions,
     )
     model = create_model(settings)

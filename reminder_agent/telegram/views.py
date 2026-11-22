@@ -6,8 +6,13 @@ from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from reminder_agent.domain.enums import Frequency, ReminderStatus, Weekday
-from reminder_agent.domain.models import Goal, Reminder, Task
+from reminder_agent.domain.enums import (
+    DeliveryStatus,
+    Frequency,
+    ReminderStatus,
+    Weekday,
+)
+from reminder_agent.domain.models import Delivery, Goal, Reminder, Task
 from reminder_agent.domain.recurrence import (
     RecurrenceRule,
     ReminderSchedule,
@@ -89,11 +94,14 @@ def format_reminders(
     reminders: list[Reminder],
     *,
     target_titles: dict[int, str] | None = None,
+    pending: dict[int, Delivery] | None = None,
+    timezone: ZoneInfo | None = None,
 ) -> str:
     if not reminders:
         return "No reminders."
     blocks = []
     target_titles = target_titles or {}
+    pending = pending or {}
     for reminder in reminders:
         fallback_target = (
             f"task #{reminder.task_id}"
@@ -101,10 +109,26 @@ def format_reminders(
             else f"goal #{reminder.goal_id}"
         )
         target = target_titles.get(reminder.id, fallback_target)
-        blocks.append(
-            f"Reminder #{reminder.id} · {target} · {reminder.status.value}\n"
+        delivery = pending.get(reminder.id) if reminder.id is not None else None
+        snoozed = (
+            delivery is not None
+            and delivery.status is DeliveryStatus.RETRY_WAIT
+        )
+        status = (
+            "snoozed"
+            if snoozed and reminder.status is ReminderStatus.COMPLETED
+            else reminder.status.value
+        )
+        block = (
+            f"Reminder #{reminder.id} · {target} · {status}\n"
             f"{format_schedule(reminder.schedule)}"
         )
+        if snoozed and timezone is not None:
+            block += (
+                "\nSnoozed until "
+                f"{format_local_moment(delivery.deliver_at_utc, timezone)}"
+            )
+        blocks.append(block)
     return "Reminders\n\n" + "\n\n".join(blocks)
 
 

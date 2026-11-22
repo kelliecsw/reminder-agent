@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from reminder_agent.domain.errors import ApplicationError, DomainError
+from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
@@ -35,6 +36,7 @@ class ToolRuntime:
     tasks: TaskService
     goals: GoalService
     reminders: ReminderService
+    deliveries: DeliveryService
 
 
 class ToolRegistry:
@@ -44,6 +46,7 @@ class ToolRegistry:
         tasks: TaskService,
         goals: GoalService,
         reminders: ReminderService,
+        deliveries: DeliveryService,
         tools: list[Any] | None = None,
         execution_service: ToolExecutionService | None = None,
     ) -> None:
@@ -57,6 +60,7 @@ class ToolRegistry:
         self.tasks = tasks
         self.goals = goals
         self.reminders = reminders
+        self.deliveries = deliveries
         self.execution_service = execution_service
 
     def schemas(self) -> list[Any]:
@@ -182,6 +186,7 @@ class ToolRegistry:
             tasks=self.tasks,
             goals=self.goals,
             reminders=self.reminders,
+            deliveries=self.deliveries,
         )
 
     def _validated_tool(
@@ -212,6 +217,7 @@ def create_tool_registry(
     tasks: TaskService,
     goals: GoalService,
     reminders: ReminderService,
+    deliveries: DeliveryService,
     execution_service: ToolExecutionService | None = None,
     tools: list[Any] | None = None,
 ) -> ToolRegistry:
@@ -219,6 +225,7 @@ def create_tool_registry(
         tasks=tasks,
         goals=goals,
         reminders=reminders,
+        deliveries=deliveries,
         execution_service=execution_service,
         tools=tools,
     )

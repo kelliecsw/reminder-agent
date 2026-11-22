@@ -5,6 +5,7 @@ import pytest
 from reminder_agent.ai.tools.registry import ToolContext, create_tool_registry
 from reminder_agent.db.database import Database
 from reminder_agent.domain.enums import Frequency, ReminderPurpose, Weekday
+from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
@@ -76,10 +77,12 @@ def test_structured_recurrence_reaches_domain_schedule(
 ):
     tasks = TaskService(database)
     reminders = ReminderService(database, clock=lambda: NOW)
+    deliveries = DeliveryService(database)
     registry = create_tool_registry(
         tasks=tasks,
         goals=GoalService(database, clock=lambda: NOW),
         reminders=reminders,
+        deliveries=deliveries,
     )
     task = tasks.create(user_id, "Test schedule")
     result = registry.execute(

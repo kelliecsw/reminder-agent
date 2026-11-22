@@ -12,6 +12,7 @@ from reminder_agent.ai.tools import get_all_tools
 from reminder_agent.ai.tools.registry import create_tool_registry
 from reminder_agent.config import Settings
 from reminder_agent.db.database import Database
+from reminder_agent.services.deliveries import DeliveryService
 from reminder_agent.services.goals import GoalService
 from reminder_agent.services.reminders import ReminderService
 from reminder_agent.services.tasks import TaskService
@@ -94,6 +95,7 @@ def test_graph_runs_agent_tool_agent_loop_with_old_style_logs(
         tasks=TaskService(database),
         goals=GoalService(database, clock=lambda: NOW),
         reminders=ReminderService(database, clock=lambda: NOW),
+        deliveries=DeliveryService(database),
     )
     graph = create_reminder_agent(
         settings=_settings(log_private_content=True),
@@ -142,6 +144,7 @@ def test_graph_can_finish_without_tools(
             tasks=TaskService(database),
             goals=GoalService(database),
             reminders=ReminderService(database),
+            deliveries=DeliveryService(database),
         ),
         clock=lambda: NOW,
     )
@@ -180,6 +183,7 @@ def test_graph_persists_follow_up_question_in_conversation(database, user_id):
             tasks=TaskService(database),
             goals=GoalService(database),
             reminders=ReminderService(database),
+            deliveries=DeliveryService(database),
         ),
         clock=lambda: NOW,
         thread_service=threads,
@@ -257,10 +261,12 @@ def test_relative_reminder_reads_clock_before_mutating(database, user_id):
     )
     tasks = TaskService(database)
     reminders = ReminderService(database, clock=lambda: NOW)
+    deliveries = DeliveryService(database)
     registry = create_tool_registry(
         tasks=tasks,
         goals=GoalService(database, clock=lambda: NOW),
         reminders=reminders,
+        deliveries=deliveries,
         execution_service=ToolExecutionService(database),
     )
     graph = create_reminder_agent(
@@ -373,6 +379,7 @@ def test_web_search_uses_normal_follow_up_and_sanitizes_result(
         tasks=TaskService(database),
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         tools=_tools_with_fake_web(web_calls),
     )
     graph = create_reminder_agent(
@@ -429,6 +436,7 @@ def test_web_search_cannot_be_mixed_with_application_mutation(database, user_id)
         tasks=tasks,
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         tools=_tools_with_fake_web(web_calls),
     )
     graph = create_reminder_agent(
@@ -492,6 +500,7 @@ def test_web_search_can_be_followed_by_application_mutation(database, user_id):
         tasks=tasks,
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         tools=_tools_with_fake_web(web_calls),
     )
     graph = create_reminder_agent(
@@ -552,6 +561,7 @@ def test_web_search_raw_messages_are_not_persisted(database, user_id):
         tasks=TaskService(database),
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         tools=_tools_with_fake_web([]),
     )
     graph = create_reminder_agent(
@@ -609,6 +619,7 @@ def test_multiple_tools_of_same_execution_kind_are_allowed(database, user_id):
         tasks=TaskService(database),
         goals=GoalService(database),
         reminders=ReminderService(database),
+        deliveries=DeliveryService(database),
         tools=_tools_with_fake_web(web_calls),
     )
     graph = create_reminder_agent(
@@ -713,6 +724,7 @@ def test_graph_compresses_old_exchanges_and_persists_summary(
             tasks=TaskService(database),
             goals=GoalService(database),
             reminders=ReminderService(database),
+            deliveries=DeliveryService(database),
         ),
         clock=lambda: NOW,
         thread_service=threads,
@@ -792,6 +804,7 @@ def test_summary_failure_does_not_commit_compression(database, user_id):
             tasks=TaskService(database),
             goals=GoalService(database),
             reminders=ReminderService(database),
+            deliveries=DeliveryService(database),
         ),
         clock=lambda: NOW,
         thread_service=threads,

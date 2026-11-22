@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage
@@ -283,6 +283,68 @@ def test_snooze_callback_reports_local_time(database, user_id):
     assert bot.messages[-1]["text"] == (
         "Snoozed until Aug 22, 2026 at 9:10 AM (Asia/Singapore)."
     )
+
+
+def test_reminders_and_today_commands_include_snoozed_reminder(
+    database,
+    user_id,
+):
+    task = TaskService(database).create(user_id, "Drink water")
+    ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    bot = FakeBot()
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _callback_update(f"d:{delivery.id}:s10"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+
+    bot = FakeBot()
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _message_update("/reminders"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+    listing = bot.messages[-1]["text"]
+    assert "· snoozed" in listing
+    assert "Snoozed until Aug 22, 2026 at 9:10 AM (Asia/Singapore)" in listing
+
+    bot = FakeBot()
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _message_update("/today"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+    assert "Snoozed until Aug 22, 2026 at 9:10 AM (Asia/Singapore)" in (
+        bot.messages[-1]["text"]
+    )
+
+    requeued = deliveries.claim_ready(NOW + timedelta(minutes=10))
+    deliveries.mark_sent(requeued.id, claim_token=requeued.claim_token)
+    deliveries.mark_acted_on(user_id, delivery.id)
+    bot = FakeBot()
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            _message_update("/reminders"),
+            SimpleNamespace(bot=bot),
+        )
+    )
+    assert "No reminders." in bot.messages[-1]["text"]
 
 
 def test_callback_cannot_operate_on_another_users_delivery(database, user_id):

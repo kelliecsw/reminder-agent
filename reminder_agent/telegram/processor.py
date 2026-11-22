@@ -18,7 +18,7 @@ from reminder_agent.domain.enums import (
     TaskStatus,
 )
 from reminder_agent.domain.errors import ApplicationError, DomainError
-from reminder_agent.domain.models import Reminder
+from reminder_agent.domain.models import Delivery, Reminder
 from reminder_agent.log_values import log_interaction, private_text
 from reminder_agent.services.delivery_actions import DeliveryActionService
 from reminder_agent.services.deliveries import DeliveryService
@@ -246,11 +246,13 @@ class TelegramProcessor:
             )
             return
         if command == "/reminders":
+            pending = self._pending_deliveries_by_reminder(user_id)
             reminders = [
                 reminder
                 for reminder in self.reminders.list(user_id)
                 if reminder.status
                 in {ReminderStatus.ACTIVE, ReminderStatus.PAUSED}
+                or reminder.id in pending
             ]
             self._log_command_result(
                 item,
@@ -266,6 +268,8 @@ class TelegramProcessor:
                 format_reminders(
                     reminders,
                     target_titles=self._reminder_titles(user_id, reminders),
+                    pending=pending,
+                    timezone=ZoneInfo(self.users.get_timezone(user_id)),
                 ),
                 reply_markup=reminder_list_actions(reminders),
                 update_id=update_id,
@@ -274,12 +278,21 @@ class TelegramProcessor:
         if command == "/today":
             timezone = ZoneInfo(self.users.get_timezone(user_id))
             today = self.clock().astimezone(timezone).date()
+            pending = self._pending_deliveries_by_reminder(user_id)
             reminders = [
                 reminder
                 for reminder in self.reminders.list(user_id)
-                if reminder.status == ReminderStatus.ACTIVE
-                and reminder.next_fire_at_utc is not None
-                and reminder.next_fire_at_utc.astimezone(timezone).date() == today
+                if (
+                    reminder.status == ReminderStatus.ACTIVE
+                    and reminder.next_fire_at_utc is not None
+                    and reminder.next_fire_at_utc.astimezone(timezone).date()
+                    == today
+                )
+                or (
+                    reminder.id in pending
+                    and pending[reminder.id].deliver_at_utc.astimezone(timezone).date()
+                    == today
+                )
             ]
             self._log_command_result(
                 item,
@@ -295,6 +308,8 @@ class TelegramProcessor:
                 format_reminders(
                     reminders,
                     target_titles=self._reminder_titles(user_id, reminders),
+                    pending=pending,
+                    timezone=timezone,
                 ),
                 update_id=update_id,
             )
@@ -708,6 +723,18 @@ class TelegramProcessor:
             ),
             result=f"outcome={outcome}",
         )
+
+    def _pending_deliveries_by_reminder(
+        self,
+        user_id: int,
+    ) -> dict[int, Delivery]:
+        """Map each reminder to its next open (non-terminal) delivery."""
+        pending: dict[int, Delivery] = {}
+        for delivery in self.deliveries.list_open(user_id):
+            current = pending.get(delivery.reminder_id)
+            if current is None or delivery.deliver_at_utc < current.deliver_at_utc:
+                pending[delivery.reminder_id] = delivery
+        return pending
 
     def _reminder_titles(
         self,

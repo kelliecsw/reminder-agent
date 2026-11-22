@@ -138,6 +138,29 @@ class DeliveryRepository:
         ).fetchall()
         return [_row_to_delivery(row) for row in rows]
 
+    def list_open_by_user(
+        self,
+        conn: sqlite3.Connection,
+        user_id: int,
+    ) -> list[Delivery]:
+        rows = conn.execute(
+            f"""
+            SELECT {_DELIVERY_COLUMNS}
+            FROM deliveries
+            WHERE user_id = ?
+              AND status NOT IN (?, ?, ?, ?)
+            ORDER BY deliver_at_utc, id
+            """,
+            (
+                user_id,
+                DeliveryStatus.ACTED_ON.value,
+                DeliveryStatus.CANCELLED.value,
+                DeliveryStatus.FAILED.value,
+                DeliveryStatus.SKIPPED.value,
+            ),
+        ).fetchall()
+        return [_row_to_delivery(row) for row in rows]
+
     def find_ready(
         self,
         conn: sqlite3.Connection,
