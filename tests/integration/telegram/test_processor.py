@@ -253,6 +253,38 @@ def test_callback_logging_uses_friendly_button_name(database, user_id, caplog):
     assert "Snooze for how long?" in messages
 
 
+def test_snooze_callback_reports_local_time(database, user_id):
+    task = TaskService(database).create(user_id, "Snooze me")
+    ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.TASK_REMINDER,
+        task_id=task.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    bot = FakeBot()
+    update = _callback_update(f"d:{delivery.id}:s10")
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            update,
+            SimpleNamespace(bot=bot),
+        )
+    )
+
+    assert deliveries.get(user_id, delivery.id).status == DeliveryStatus.RETRY_WAIT
+    assert bot.messages[-1]["text"] == (
+        "Snoozed until Aug 22, 2026 at 9:10 AM (Asia/Singapore)."
+    )
+
+
 def test_callback_cannot_operate_on_another_users_delivery(database, user_id):
     with database.transaction() as conn:
         other_user_id = UserRepository().create(conn, timezone="UTC")

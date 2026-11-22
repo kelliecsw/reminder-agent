@@ -42,6 +42,7 @@ from reminder_agent.telegram.normalize import (
 )
 from reminder_agent.telegram.views import (
     format_goals,
+    format_local_moment,
     format_reminders,
     format_tasks,
     reminder_list_actions,
@@ -421,7 +422,9 @@ class TelegramProcessor:
                 }[action]
                 snoozed_until = self.clock() + delay
                 self.deliveries.snooze(user_id, resource_id, snoozed_until)
-                return {"response": f"Snoozed until {snoozed_until.isoformat()}."}
+                timezone = ZoneInfo(self.users.get_timezone(user_id))
+                until_local = format_local_moment(snoozed_until, timezone)
+                return {"response": f"Snoozed until {until_local}."}
             raise ValueError("Unknown button action.")
 
         identity = callback_identity(

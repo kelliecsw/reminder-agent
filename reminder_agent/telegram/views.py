@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, time
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -173,6 +174,12 @@ def _monthly_selector(rule: RecurrenceRule, start_date: date) -> str:
     return _join_words([_ordinal(day) for day in days])
 
 
+def format_local_moment(moment_utc: datetime, timezone: ZoneInfo) -> str:
+    """Render a UTC instant as the user's local date and time."""
+    local = moment_utc.astimezone(timezone)
+    return f"{_format_date(local.date())} at {_format_time(local.time())} ({timezone.key})"
+
+
 def _format_time(value: time) -> str:
     return value.strftime("%I:%M %p").lstrip("0")
 
@@ -203,6 +210,7 @@ def _join_words(items: list[str]) -> str:
 
 __all__ = [
     "format_goals",
+    "format_local_moment",
     "format_reminders",
     "format_schedule",
     "format_tasks",
