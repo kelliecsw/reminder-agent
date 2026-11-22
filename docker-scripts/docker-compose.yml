@@ -14,4 +14,4 @@ services:
 networks:
   cliproxy:
     external: true
-    name: agent-apiproxy_default
+    name: agent-proxy_default
