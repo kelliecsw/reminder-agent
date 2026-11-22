@@ -1,5 +1,47 @@
-# Example workflow for classic Git Flow:
-# See docs/git-flow-guide.md for setup, branch policy, PR flow, and merge settings.
+# Example workflow for classic Git Flow.
+#
+# SETUP — do this in YOUR GitHub application repository.
+# Copy this file to .github/workflows/version-bump-git-flow-classic.yml.
+# Enable only ONE versioning workflow; reviewed Classic uses this same file.
+#
+# ALREADY HAVE KEYS? Run these locally, ONE AT A TIME, then paste each output:
+# Destination: your repo > Settings > Secrets and variables > Actions > New repository secret.
+# Select your dedicated automation key from the first command, then replace YOUR_GPG_KEY_ID with its long ID/full fingerprint and use your own SSH filename.
+#
+#   gpg --list-secret-keys --keyid-format=long
+#   gpg --export-secret-key -a YOUR_GPG_KEY_ID  # -> secret BOT_GPG_SECRETKEY
+#   cat "$HOME/.ssh/YOUR_AUTOMATION_SSH_KEY"   # -> secret BOT_SSH_SECRETKEY (NOT .pub)
+#
+# Paste the COMPLETE private-key blocks, including BEGIN/END markers.
+# No export file needed. Use a private, unrecorded terminal; never paste keys into YAML, source files, chat, or logs. Terminal/clipboard history can retain them.
+# These steps have no GPG/SSH passphrase configured; protected keys need adaptation.
+# Already registered the public keys and write access? Skip the optional steps below.
+#
+# NEED A KEY? Create ONLY the missing key locally, with your own automation identity:
+#   gpg --full-generate-key
+#     Choose a signing-capable key, expiry, and YOUR automation name/email.
+#   mkdir -p "$HOME/.ssh"
+#   ssh-keygen -t ed25519 -C 'YOUR_AUTOMATION_EMAIL' -f "$HOME/.ssh/git_tools_bot_ed25519"
+#     Never overwrite an existing key; choose another filename if needed.
+# Only if your policy permits unattended keys, leave the NEW automation keys' passphrases empty (SSH: Enter twice). Never strip protection from a personal key.
+# Then use the SAME list/export/cat block above with the new key ID/SSH filename.
+#
+# PUBLIC KEYS — register only if not already configured (these are NOT secrets):
+#   gpg --export -a YOUR_GPG_KEY_ID
+#     -> signing account > Settings > SSH and GPG keys > New GPG key.
+#   cat "$HOME/.ssh/YOUR_AUTOMATION_SSH_KEY.pub"
+#     -> your repo > Settings > Deploy keys > Add deploy key > Allow write access, OR your own bot account's SSH authentication keys with repo write access.
+# Never put a private key on a public-key registration screen.
+#
+# EDIT env BELOW: use YOUR automation GIT_BOT_NAME / GIT_BOT_EMAIL, not David's.
+# The email must match the GPG identity and a verified email on the signing account.
+# Use your own GitHub owner/repo for the APPLICATION remote; keep GIT_TOOLS_REPO as the upstream tool source unless intentionally using your own git-tools fork.
+# Verify GIT_TOOLS_REF is a supported branch/tag; local CLI updates do not update it.
+# Allow this SSH identity to push signed commits/tags through your branch rules.
+# For PR merges, use the PR title as the final commit subject; disable rebase merge.
+# Full process, branch policy, bootstrap, and recovery: docs/github/setup.md and docs/github/classic-walkthrough.md in the git-tools source repository.
+#
+# VERSION POLICY:
 # - develop -> tagged alpha prereleases on the upcoming release line
 # - release/<x.y.z> stabilizes that same line as rc prereleases
 # - master -> stable releases
@@ -21,8 +63,10 @@ on:
   workflow_dispatch:
 
 env:
+  # Set to 'false' here to bump only .cz.toml (default enabled).
+  GIT_TOOLS_BUMP_SYNC_AUXILIARY: 'true'
   GIT_TOOLS_REPO: https://github.com/davidyytan/git-tools.git
-  GIT_TOOLS_REF: feature/support-for-semver-1
+  GIT_TOOLS_REF: develop
   GIT_BOT_NAME: kelliecsw-bot
   GIT_BOT_EMAIL: kellie.chin2@gmail.com
 
@@ -69,32 +113,46 @@ jobs:
           PY
 
       - name: Show decision
+        env:
+          DECISION_BRANCH: ${{ steps.strategy.outputs.branch }}
+          DECISION_SKIP: ${{ steps.strategy.outputs.skip }}
+          DECISION_INVALID: ${{ steps.strategy.outputs.invalid }}
+          DECISION_MODE: ${{ steps.strategy.outputs.mode }}
+          DECISION_REASON: ${{ steps.strategy.outputs.reason }}
+          DECISION_ERROR: ${{ steps.strategy.outputs.error }}
+          DECISION_RELEASE_TARGET: ${{ steps.strategy.outputs.release_target }}
+          DECISION_HOTFIX_TARGET: ${{ steps.strategy.outputs.hotfix_target }}
+          DECISION_CURRENT_VERSION: ${{ steps.strategy.outputs.current_version }}
+          DECISION_CURRENT_RELEASE_LINE: ${{ steps.strategy.outputs.current_release_line }}
+          DECISION_MASTER_VERSION: ${{ steps.strategy.outputs.master_version }}
+          DECISION_MASTER_RELEASE_LINE: ${{ steps.strategy.outputs.master_release_line }}
+          DECISION_BOOTSTRAP_COMMITIZEN_VERSION_OK: ${{ steps.strategy.outputs.bootstrap_commitizen_version_ok }}
+          DECISION_BOOTSTRAP_SUBJECT_OK: ${{ steps.strategy.outputs.bootstrap_subject_ok }}
+          DECISION_CURRENT_IS_PRERELEASE: ${{ steps.strategy.outputs.current_is_prerelease }}
+          DECISION_BUMP_ELIGIBLE: ${{ steps.strategy.outputs.bump_eligible }}
+          DECISION_BRANCH_GATE_REF: ${{ steps.strategy.outputs.branch_gate_ref }}
+          DECISION_BRANCH_HAS_UNIQUE_COMMITS: ${{ steps.strategy.outputs.branch_has_unique_commits }}
+          DECISION_CREATE_TAG: ${{ steps.strategy.outputs.create_tag }}
+          DECISION_SUBJECT: ${{ steps.strategy.outputs.subject }}
         run: |
-          echo "branch=${{ steps.strategy.outputs.branch }}"
-          echo "skip=${{ steps.strategy.outputs.skip }}"
-          echo "invalid=${{ steps.strategy.outputs.invalid }}"
-          echo "mode=${{ steps.strategy.outputs.mode }}"
-          echo "reason=${{ steps.strategy.outputs.reason }}"
-          echo "error=${{ steps.strategy.outputs.error }}"
-          echo "release_target=${{ steps.strategy.outputs.release_target }}"
-          echo "hotfix_target=${{ steps.strategy.outputs.hotfix_target }}"
-          echo "current_version=${{ steps.strategy.outputs.current_version }}"
-          echo "current_release_line=${{ steps.strategy.outputs.current_release_line }}"
-          echo "master_version=${{ steps.strategy.outputs.master_version }}"
-          echo "master_release_line=${{ steps.strategy.outputs.master_release_line }}"
-          echo "bootstrap_commitizen_version_ok=${{ steps.strategy.outputs.bootstrap_commitizen_version_ok }}"
-          echo "bootstrap_subject_ok=${{ steps.strategy.outputs.bootstrap_subject_ok }}"
-          echo "current_is_prerelease=${{ steps.strategy.outputs.current_is_prerelease }}"
-          echo "bump_eligible=${{ steps.strategy.outputs.bump_eligible }}"
-          echo "branch_gate_ref=${{ steps.strategy.outputs.branch_gate_ref }}"
-          echo "branch_has_unique_commits=${{ steps.strategy.outputs.branch_has_unique_commits }}"
-          echo "create_tag=${{ steps.strategy.outputs.create_tag }}"
-          echo "subject=${{ steps.strategy.outputs.subject }}"
+          python - <<'PY'
+          import json
+          import os
+          for key in sorted(os.environ):
+              if key.startswith("DECISION_"):
+                  print(f"{key[9:].lower()}={json.dumps(os.environ[key], ensure_ascii=True)}")
+          PY
 
       - name: Fail invalid release branch configuration
         if: steps.strategy.outputs.invalid == 'true'
+        env:
+          DECISION_ERROR: ${{ steps.strategy.outputs.error }}
         run: |
-          echo "${{ steps.strategy.outputs.error }}"
+          python - <<'PY'
+          import json
+          import os
+          print("Decision error: " + json.dumps(os.environ["DECISION_ERROR"], ensure_ascii=True))
+          PY
           exit 1
 
       - name: Import GPG key
@@ -118,12 +176,18 @@ jobs:
           git config --local user.email "$GIT_BOT_EMAIL"
           git fetch --force --tags origin
 
-          PYTHONPATH="$RUNNER_TEMP/git-tools" python -m git_tools.generators.bumpgen $BUMP_ARGS
+          PYTHONPATH="$RUNNER_TEMP/git-tools" python - <<'PY'
+          import os
+          import shlex
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, "-m", "git_tools.generators.bumpgen", *shlex.split(os.environ["BUMP_ARGS"])], check=True)
+          PY
 
       - name: Push changes
         if: steps.strategy.outputs.skip != 'true' && steps.strategy.outputs.invalid != 'true'
+        env:
+          BRANCH_NAME: ${{ github.ref_name }}
+          CREATE_TAG: ${{ steps.strategy.outputs.create_tag }}
         run: |
-          git push
-          if [ "${{ steps.strategy.outputs.create_tag }}" = "true" ]; then
-            git push --tags
-          fi
+          PYTHONPATH="$RUNNER_TEMP/git-tools" python -m git_tools.generators.publish --branch "$BRANCH_NAME" --create-tag "$CREATE_TAG"
