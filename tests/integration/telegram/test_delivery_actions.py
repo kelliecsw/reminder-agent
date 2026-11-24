@@ -146,6 +146,7 @@ def test_done_records_progress_for_goal_reminder_occurrence(
 
     assert result.reminder_purpose == ReminderPurpose.GOAL_REMINDER
     assert result.delivery.status == DeliveryStatus.ACTED_ON
+    assert result.goal_title == goal.title
     progress = GoalService(database).list_progress(user_id, goal.id)
     assert len(progress) == 1
     assert progress[0].note == "Completed reminder occurrence"

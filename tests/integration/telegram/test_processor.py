@@ -418,7 +418,7 @@ def test_done_callback_marks_only_the_task_reminder_occurrence(database, user_id
         ReminderService(database).get(user_id, reminder.id).status
         == ReminderStatus.ACTIVE
     )
-    assert bot.messages[-1]["text"] == "Marked this reminder occurrence done."
+    assert bot.messages[-1]["text"] == "Done."
 
 
 def test_done_callback_completes_task_for_last_single_occurrence_reminder(
@@ -451,7 +451,39 @@ def test_done_callback_completes_task_for_last_single_occurrence_reminder(
     )
 
     assert TaskService(database).list(user_id)[0].status == TaskStatus.COMPLETED
-    assert "task 'Drink water' completed" in bot.messages[-1]["text"]
+    assert "Task 'Drink water' completed" in bot.messages[-1]["text"]
+
+
+def test_done_callback_reports_goal_progress(database, user_id):
+    goal = GoalService(database).create(user_id, "Run 5k")
+    ReminderService(database, clock=lambda: NOW.replace(day=21)).create(
+        user_id,
+        purpose=ReminderPurpose.GOAL_REMINDER,
+        goal_id=goal.id,
+        schedule=ReminderSchedule(
+            start_date=date(2026, 8, 22),
+            local_time=time(9),
+            timezone="Asia/Singapore",
+        ),
+    )
+    deliveries = DeliveryService(database)
+    delivery = ReminderMaterializer(deliveries).run_once(NOW)[0]
+    claimed = deliveries.claim_ready(NOW)
+    deliveries.mark_sent(claimed.id, claim_token=claimed.claim_token)
+    bot = FakeBot()
+    update = _callback_update(f"d:{delivery.id}:done")
+
+    asyncio.run(
+        _processor(database, user_id, FakeGraph()).handle(
+            update,
+            SimpleNamespace(bot=bot),
+        )
+    )
+
+    assert bot.messages[-1]["text"] == (
+        "Done. Logged progress for 'Run 5k'."
+    )
+    assert GoalService(database).list_progress(user_id, goal.id)
 
 
 def test_done_callback_completes_task_only_after_its_last_reminder(
@@ -501,7 +533,7 @@ def test_done_callback_completes_task_only_after_its_last_reminder(
         )
     )
     assert TaskService(database).list(user_id)[0].status == TaskStatus.COMPLETED
-    assert "task 'Submit report' completed" in bot.messages[-1]["text"]
+    assert "Task 'Submit report' completed" in bot.messages[-1]["text"]
 
 
 def test_done_callback_keeps_task_active_with_paused_sibling_reminder(
@@ -647,6 +679,6 @@ def test_replayed_callback_does_not_repeat_mutation(database, user_id):
 
     assert deliveries.get(user_id, delivery.id).status == DeliveryStatus.SKIPPED
     assert [message["text"] for message in bot.messages] == [
-        "Skipped this reminder occurrence.",
-        "Skipped this reminder occurrence.",
+        "Skipped.",
+        "Skipped.",
     ]

@@ -415,26 +415,27 @@ class TelegramProcessor:
             if action == "done":
                 result = self.delivery_actions.done(user_id, resource_id)
                 if result.task_completed:
-                    response = (
-                        "Marked this reminder occurrence done — task "
-                        f"'{result.task_title}' completed."
-                    )
+                    response = f"Done. Task '{result.task_title}' completed."
                 elif result.reminder_purpose == ReminderPurpose.GOAL_REMINDER:
                     response = (
-                        "Marked this reminder occurrence done and recorded goal progress."
+                        f"Done. Logged progress for '{result.goal_title}'."
                     )
                 else:
-                    response = "Marked this reminder occurrence done."
+                    response = "Done."
                 return {"response": response}
             if action == "skip":
                 self.deliveries.skip(user_id, resource_id)
-                return {"response": "Skipped this reminder occurrence."}
+                return {"response": "Skipped."}
             if action == "pause":
                 self.delivery_actions.pause_reminder_from_delivery(
                     user_id,
                     resource_id,
                 )
-                return {"response": "Paused the reminder."}
+                return {
+                    "response": (
+                        "Reminder paused. Resume it anytime from /reminders."
+                    )
+                }
             if action in {"s10", "s60", "sday"}:
                 delay = {
                     "s10": timedelta(minutes=10),

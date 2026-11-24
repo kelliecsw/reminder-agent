@@ -35,6 +35,7 @@ class DoneResult:
     reminder_purpose: ReminderPurpose
     task_completed: bool = False
     task_title: str | None = None
+    goal_title: str | None = None
 
 
 class DeliveryActionService:
@@ -123,6 +124,7 @@ class DeliveryActionService:
             return DoneResult(
                 delivery=updated,
                 reminder_purpose=ReminderPurpose.GOAL_REMINDER,
+                goal_title=goal.title,
             )
 
     def _exhausts_task(
